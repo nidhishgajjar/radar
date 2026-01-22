@@ -105,29 +105,39 @@
 				// Update progress
 				filterProgress = data.progress || 0;
 
-				// Merge filtered results - update scores and remove filtered-out items
+				// Update filter metadata on existing results (don't remove anything yet)
 				if (data.results && data.results.length > 0) {
-					const filteredIds = new Set(data.results.map((r: SearchResult) => r.id));
+					const filteredMap = new Map(data.results.map((r: SearchResult) => [r.id, r]));
 
-					// Update existing results with filter metadata and remove filtered-out ones
-					results = results
-						.map(r => {
-							const filtered = data.results.find((f: SearchResult) => f.id === r.id);
-							if (filtered) {
-								return { ...r, filterMetadata: filtered.filterMetadata };
-							}
-							return r;
-						})
-						.filter(r => filteredIds.has(r.id))
-						.sort((a, b) => {
-							const scoreA = a.filterMetadata?.fitScore || 0;
-							const scoreB = b.filterMetadata?.fitScore || 0;
-							return scoreB - scoreA;
-						});
+					// Update existing results with filter metadata
+					results = results.map(r => {
+						const filtered = filteredMap.get(r.id);
+						if (filtered?.filterMetadata) {
+							return { ...r, filterMetadata: filtered.filterMetadata };
+						}
+						return r;
+					});
+
+					// Sort: scored items first (by score), then unscored items
+					results = results.sort((a, b) => {
+						const hasA = a.filterMetadata?.fitScore !== undefined;
+						const hasB = b.filterMetadata?.fitScore !== undefined;
+						if (hasA && hasB) {
+							return (b.filterMetadata?.fitScore || 0) - (a.filterMetadata?.fitScore || 0);
+						}
+						if (hasA) return -1;
+						if (hasB) return 1;
+						return 0;
+					});
 				}
 
-				// Check if complete
+				// Check if complete - only NOW remove filtered-out items
 				if (data.status === 'completed') {
+					// Final cleanup: remove low-score items
+					if (data.results && data.results.length > 0) {
+						const finalIds = new Set(data.results.map((r: SearchResult) => r.id));
+						results = results.filter(r => finalIds.has(r.id));
+					}
 					filteringInProgress = false;
 					filterProgress = 100;
 					return;

@@ -282,77 +282,62 @@ export class AgenticSearchService {
 			};
 		}
 
-		console.log(`Applying LLM filtering to ${results.length} results...`);
+		console.log(`Applying LLM filtering to ${results.length} results in parallel...`);
 
-		// Process in batches for progressive updates
-		const batchSize = 10;
-		const filteredResults: SearchResult[] = [];
+		// Track progress
 		let processed = 0;
+		const filteredResults: SearchResult[] = [];
 
-		for (let i = 0; i < results.length; i += batchSize) {
-			const batch = results.slice(i, i + batchSize);
-
-			// Process batch in parallel
-			const batchPromises = batch.map(async (result) => {
-				try {
-					// Create profile summary for LLM
-					const profileSummary = `
+		// Process ALL results in parallel
+		const filterPromises = results.map(async (result) => {
+			try {
+				const profileSummary = `
 Title: ${result.title}
 URL: ${result.url}
 ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
-					`.trim();
+				`.trim();
 
-					const filterResult = await this.openRouter.filterAndRankCandidate(
-						profileSummary,
-						userQuery,
-						filters?.excludeCurrentEmployer,
-						filters?.minYearsExperience
-					);
+				const filterResult = await this.openRouter.filterAndRankCandidate(
+					profileSummary,
+					userQuery,
+					filters?.excludeCurrentEmployer,
+					filters?.minYearsExperience
+				);
 
-					// Add filter metadata to result
-					result.filterMetadata = filterResult;
+				result.filterMetadata = filterResult;
 
-					return result;
-				} catch (error) {
-					console.error('Failed to filter candidate:', error);
-					// On error, mark as low score but keep in results
-					result.filterMetadata = {
-						isExternal: true,
-						fitScore: 30,
-						reasoning: 'Filtering error',
-						currentEmployer: undefined
-					};
-					return result;
+				// Update progress immediately as each completes
+				processed++;
+				filteredResults.push(result);
+
+				if (searchId) {
+					const currentFiltered = filteredResults.filter((r) => {
+						if (!r.filterMetadata) return false;
+						if (filters?.externalOnly && !r.filterMetadata.isExternal) return false;
+						if (r.filterMetadata.fitScore < 40) return false;
+						return true;
+					}).sort((a, b) => (b.filterMetadata?.fitScore || 0) - (a.filterMetadata?.fitScore || 0));
+
+					filterStateManager.updateProgress(searchId, processed, currentFiltered);
 				}
-			});
 
-			const batchResults = await Promise.all(batchPromises);
-			filteredResults.push(...batchResults);
-			processed += batchResults.length;
-
-			// Update progress if searchId provided
-			if (searchId) {
-				// Apply filters and sort before updating progress
-				const currentFiltered = filteredResults.filter((result) => {
-					if (!result.filterMetadata) return false;
-					if (filters?.externalOnly && !result.filterMetadata.isExternal) {
-						return false;
-					}
-					if (result.filterMetadata.fitScore < 40) {
-						return false;
-					}
-					return true;
-				});
-
-				currentFiltered.sort((a, b) => {
-					const scoreA = a.filterMetadata?.fitScore || 0;
-					const scoreB = b.filterMetadata?.fitScore || 0;
-					return scoreB - scoreA;
-				});
-
-				filterStateManager.updateProgress(searchId, processed, currentFiltered);
+				return result;
+			} catch (error) {
+				console.error('Failed to filter candidate:', error);
+				result.filterMetadata = {
+					isExternal: true,
+					fitScore: 30,
+					reasoning: 'Filtering error',
+					currentEmployer: undefined
+				};
+				processed++;
+				filteredResults.push(result);
+				return result;
 			}
-		}
+		});
+
+		// Wait for all to complete
+		await Promise.all(filterPromises);
 
 		// Filter out internal candidates and low scores
 		const externalResults = filteredResults.filter(result => {
