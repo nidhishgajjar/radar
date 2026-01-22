@@ -122,57 +122,6 @@ Output: "Marketing Director Canada SaaS software B2B experience"`;
 		}
 	}
 
-	/**
-	 * Fast local query generation - no LLM needed for simple searches.
-	 * Returns null if the query is too complex and needs LLM.
-	 */
-	private generateQueriesLocally(
-		query: string,
-		location: string | null,
-		flexibleLocation: boolean
-	): string[] | null {
-		// Extract potential job title from query
-		const titlePatterns = [
-			/\b(senior|lead|principal|staff|junior|mid|entry)\s+(software|frontend|backend|fullstack|full-stack|mobile|ios|android|devops|cloud|data|ml|machine learning|ai|product|ux|ui)\s*(engineer|developer|designer|manager|analyst|scientist|architect)/gi,
-			/\b(software|frontend|backend|fullstack|full-stack|mobile|devops|cloud|data|product)\s*(engineer|developer|designer|manager|analyst|architect)/gi,
-			/\b(cto|ceo|cfo|coo|vp|director|head|manager|lead)\s*(of)?\s*(engineering|product|design|marketing|sales|operations|finance|hr|people)?/gi,
-			/\b(nurse|doctor|physician|surgeon|therapist|pharmacist|technician|administrator)/gi
-		];
-
-		let baseTitle: string | null = null;
-		for (const pattern of titlePatterns) {
-			const match = query.match(pattern);
-			if (match) {
-				baseTitle = match[0];
-				break;
-			}
-		}
-
-		// If no clear job title found, can't generate locally
-		if (!baseTitle) {
-			return null;
-		}
-
-		// Generate title variations
-		const seniorityLevels = ['Senior', 'Lead', 'Principal', 'Staff'];
-		const baseTitleClean = baseTitle.replace(/^(senior|lead|principal|staff|junior|mid|entry)\s+/i, '');
-
-		const queries: string[] = [];
-		const locationSuffix = location && !flexibleLocation ? ` ${location}` : '';
-
-		// Add variations with different seniority levels
-		for (const level of seniorityLevels) {
-			queries.push(`"${level} ${baseTitleClean}"${locationSuffix}`);
-		}
-
-		// Add the original query as well
-		if (!queries.some(q => q.toLowerCase().includes(baseTitle!.toLowerCase()))) {
-			queries.unshift(`"${baseTitle}"${locationSuffix}`);
-		}
-
-		return queries.slice(0, 4); // Limit to 4 queries
-	}
-
 	async generateRecruitmentQueries(
 		jobDescription: string,
 		excludeEmployer?: string,
@@ -183,35 +132,54 @@ Output: "Marketing Director Canada SaaS software B2B experience"`;
 		const locationMatch = jobDescription.match(/\b(Toronto|Vancouver|Calgary|Edmonton|Ottawa|Montreal|Winnipeg|Halifax|Victoria|BC|Ontario|Alberta|Quebec|Canada|USA|New York|San Francisco|Seattle|Boston|Chicago|Los Angeles|Austin|Denver|Miami|Atlanta)\b/gi);
 		const detectedLocation = locationMatch ? [...new Set(locationMatch)].join(', ') : null;
 
-		// Try fast local generation first (for simple queries)
-		if (jobDescription.length < 150 && !excludeEmployer) {
-			const localQueries = this.generateQueriesLocally(jobDescription, detectedLocation, flexibleLocation);
-			if (localQueries && localQueries.length >= 2) {
-				console.log('Using fast local query generation');
-				return localQueries;
-			}
-		}
+		const geoContext = geographicFocus?.length
+			? `Focus on these regions: ${geographicFocus.join(', ')}`
+			: detectedLocation
+				? `STRICT LOCATION: Only search for candidates in or near ${detectedLocation}`
+				: 'Search across Canada and USA';
 
-		// Fall back to LLM for complex queries - use a faster model
-		const fastModel = 'google/gemini-2.0-flash-001';
+		const locationRule = flexibleLocation
+			? 'Location is flexible - include nearby regions'
+			: detectedLocation
+				? `CRITICAL: Every query MUST include "${detectedLocation}" - only find candidates in this specific location`
+				: '';
 
-		const locationSuffix = detectedLocation && !flexibleLocation ? ` in ${detectedLocation}` : '';
-		const systemPrompt = `Generate 4 LinkedIn search queries for: ${jobDescription}${locationSuffix}
-${excludeEmployer ? `Exclude: ${excludeEmployer}` : ''}
-Return ONLY a JSON array of 4 search strings. Use title variations (Senior, Lead, Principal, Staff).`;
+		const excludeContext = excludeEmployer
+			? `CRITICAL: Exclude anyone currently at "${excludeEmployer}"`
+			: '';
+
+		const systemPrompt = `You are an executive recruiter generating LinkedIn search queries to find EXTERNAL candidates.
+
+Job: ${jobDescription}
+
+${geoContext}
+${locationRule}
+${excludeContext}
+
+Generate 4 different search queries that will find RECRUITABLE external candidates:
+
+RULES:
+1. Focus on similar roles at OTHER organizations${excludeEmployer ? ` (not ${excludeEmployer})` : ''}
+2. ${detectedLocation && !flexibleLocation ? `MANDATORY: Include "${detectedLocation}" in EVERY query` : 'Include geographic locations from the job description'}
+3. Use the EXACT job title from the description (e.g., "Executive Director" not just "Director")
+4. Include industry/domain keywords (healthcare, technology, finance, etc.)
+5. Each query should target different candidate pools
+
+Return ONLY a JSON array of 4 search query strings.`;
 
 		const request: OpenRouterRequest = {
-			model: fastModel,
+			model: this.model, // Use Grok Fast
 			messages: [
-				{ role: 'user', content: systemPrompt }
+				{ role: 'system', content: systemPrompt },
+				{ role: 'user', content: jobDescription }
 			],
-			temperature: 0.2,
-			max_tokens: 150
+			temperature: 0.3,
+			max_tokens: 250
 		};
 
 		try {
 			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
+			const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
 			const response = await fetch(`${this.baseUrl}/chat/completions`, {
 				method: 'POST',
@@ -260,9 +228,8 @@ Return ONLY a JSON array of 4 search strings. Use title variations (Senior, Lead
 			return [jobDescription];
 		} catch (error) {
 			console.error('Failed to generate recruitment queries:', error);
-			// Fallback to local generation or original query
-			const fallback = this.generateQueriesLocally(jobDescription, detectedLocation, flexibleLocation);
-			return fallback || [jobDescription];
+			// Fallback to original query
+			return [jobDescription];
 		}
 	}
 
@@ -278,10 +245,7 @@ Return ONLY a JSON array of 4 search strings. Use title variations (Senior, Lead
 		reasoning: string;
 		recentlyLeft?: boolean;
 	}> {
-		// Use faster model for filtering (high volume)
-		const fastModel = 'google/gemini-2.0-flash-001';
-
-		// Simplified prompt for speed
+		// Use Grok Fast for filtering
 		const prompt = `Analyze LinkedIn profile for job fit.
 Job: ${jobDescription}
 ${excludeEmployer ? `Exclude if at: ${excludeEmployer}` : ''}
@@ -292,7 +256,7 @@ ${profile.substring(0, 1500)}
 Return JSON: {"currentEmployer":"name or null","isExternal":true/false,"fitScore":0-100,"reasoning":"brief"}`;
 
 		const request: OpenRouterRequest = {
-			model: fastModel,
+			model: this.model, // Grok Fast
 			messages: [
 				{ role: 'user', content: prompt }
 			],
