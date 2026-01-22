@@ -206,12 +206,9 @@ export class AgenticSearchService {
 		if (searchQueries.length === 0) {
 			console.log('Generating recruitment queries...');
 
-			// First, refine the original query to understand intent
-			const refinedQuery = await this.refineQuery(userQuery);
-
-			// Then generate multiple search angles
+			// Generate queries directly - skip separate refinement for speed
 			const generated = await this.openRouter.generateRecruitmentQueries(
-				refinedQuery.refined,
+				userQuery,
 				filters?.excludeCurrentEmployer,
 				filters?.geographicFocus
 			);

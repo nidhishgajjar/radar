@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { flip } from 'svelte/animate';
+	import { fade } from 'svelte/transition';
 	import SearchBar from '../components/SearchBar.svelte';
 	import PersonCard from '../components/PersonCard.svelte';
 	import ProfileModal from '../components/ProfileModal.svelte';
@@ -101,9 +103,25 @@
 				// Update progress
 				filterProgress = data.progress || 0;
 
-				// Update results with filtered data if available
+				// Merge filtered results - update scores and remove filtered-out items
 				if (data.results && data.results.length > 0) {
-					results = data.results;
+					const filteredIds = new Set(data.results.map((r: SearchResult) => r.id));
+
+					// Update existing results with filter metadata and remove filtered-out ones
+					results = results
+						.map(r => {
+							const filtered = data.results.find((f: SearchResult) => f.id === r.id);
+							if (filtered) {
+								return { ...r, filterMetadata: filtered.filterMetadata };
+							}
+							return r;
+						})
+						.filter(r => filteredIds.has(r.id))
+						.sort((a, b) => {
+							const scoreA = a.filterMetadata?.fitScore || 0;
+							const scoreB = b.filterMetadata?.fitScore || 0;
+							return scoreB - scoreA;
+						});
 				}
 
 				// Check if complete
@@ -247,7 +265,9 @@
 				{/if}
 				<div class="results-grid">
 					{#each results as person (person.id)}
-						<PersonCard {person} onClick={() => openProfile(person)} />
+						<div animate:flip={{ duration: 300 }} transition:fade={{ duration: 200 }}>
+							<PersonCard {person} onClick={() => openProfile(person)} />
+						</div>
 					{/each}
 				</div>
 				{#if hasMore}
