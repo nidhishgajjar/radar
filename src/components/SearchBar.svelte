@@ -38,13 +38,13 @@
 			icon: 'link',
 			label: 'Job URL',
 			placeholder: 'Paste job posting URL...',
-			color: '#34c759'
+			color: '#007aff'
 		},
 		jd: {
 			icon: 'doc',
 			label: 'Job Description',
 			placeholder: 'Paste job description...',
-			color: '#af52de'
+			color: '#007aff'
 		}
 	};
 
@@ -225,16 +225,6 @@
 		background: #007aff;
 		border-color: #007aff;
 		color: #ffffff;
-	}
-
-	.mode-pill.active:nth-child(2) {
-		background: #34c759;
-		border-color: #34c759;
-	}
-
-	.mode-pill.active:nth-child(3) {
-		background: #af52de;
-		border-color: #af52de;
 	}
 
 	.input-wrapper {
