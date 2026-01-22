@@ -20,6 +20,7 @@
 	let currentPage = $state(1);
 	let hasMore = $state(false);
 	let queries: string[] = $state([]);
+	let flexibleLocation = $state(false);
 
 	// Two-phase loading state
 	let searchId = $state<string | null>(null);
@@ -47,7 +48,8 @@
 					query: searchQuery,
 					page: 1,
 					filters: {
-						externalOnly: true
+						externalOnly: true,
+						flexibleLocation
 					}
 				})
 			});
@@ -168,7 +170,8 @@
 					page: nextPage,
 					queries,
 					filters: {
-						externalOnly: true
+						externalOnly: true,
+						flexibleLocation
 					}
 				})
 			});
@@ -229,7 +232,7 @@
 			<p class="subtitle">Talent intelligence for smarter hiring</p>
 		</header>
 
-		<SearchBar bind:value={query} onSearch={handleSearch} />
+		<SearchBar bind:value={query} bind:flexibleLocation={flexibleLocation} onSearch={handleSearch} />
 
 		{#if loading}
 			<LoadingState />

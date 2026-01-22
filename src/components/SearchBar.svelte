@@ -1,5 +1,5 @@
 <script lang="ts">
-	let { value = $bindable(''), onSearch }: { value: string; onSearch: (query: string) => void } = $props();
+	let { value = $bindable(''), flexibleLocation = $bindable(false), onSearch }: { value: string; flexibleLocation: boolean; onSearch: (query: string) => void } = $props();
 
 	// Detect input mode
 	type InputMode = 'search' | 'url' | 'jd';
@@ -159,16 +159,18 @@
 			{/if}
 		</div>
 
-		<!-- Mode hint -->
-		{#if value.length === 0}
-			<div class="mode-hint">
-				<span class="hint-text">Tip: Paste a job URL or full job description for smarter matching</span>
-			</div>
-		{:else if inputMode() !== 'search'}
-			<div class="mode-badge" style="background: {currentMode.color}15; color: {currentMode.color}">
-				{currentMode.label} detected
-			</div>
-		{/if}
+		<!-- Options row -->
+		<div class="options-row">
+			<label class="toggle-option">
+				<input type="checkbox" bind:checked={flexibleLocation} />
+				<span class="toggle-label">Flexible location</span>
+			</label>
+			{#if inputMode() !== 'search' && value.length > 0}
+				<div class="mode-badge" style="background: {currentMode.color}15; color: {currentMode.color}">
+					{currentMode.label} detected
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>
 
@@ -284,13 +286,36 @@
 		transform: scale(0.95);
 	}
 
-	.mode-hint {
-		padding: 0 16px 12px;
+	.options-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 8px 16px 12px;
+		border-top: 1px solid #f0f0f2;
 	}
 
-	.hint-text {
+	.toggle-option {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		cursor: pointer;
+		user-select: none;
+	}
+
+	.toggle-option input[type="checkbox"] {
+		width: 16px;
+		height: 16px;
+		accent-color: #007aff;
+		cursor: pointer;
+	}
+
+	.toggle-label {
 		font-size: 13px;
 		color: #86868b;
+	}
+
+	.toggle-option:hover .toggle-label {
+		color: #1d1d1f;
 	}
 
 	.mode-badge {

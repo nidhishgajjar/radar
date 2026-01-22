@@ -210,7 +210,8 @@ export class AgenticSearchService {
 			const generated = await this.openRouter.generateRecruitmentQueries(
 				userQuery,
 				filters?.excludeCurrentEmployer,
-				filters?.geographicFocus
+				filters?.geographicFocus,
+				filters?.flexibleLocation ?? false
 			);
 
 			searchQueries.push(...generated);

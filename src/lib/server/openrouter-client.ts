@@ -125,11 +125,24 @@ Output: "Marketing Director Canada SaaS software B2B experience"`;
 	async generateRecruitmentQueries(
 		jobDescription: string,
 		excludeEmployer?: string,
-		geographicFocus?: string[]
+		geographicFocus?: string[],
+		flexibleLocation: boolean = false
 	): Promise<string[]> {
+		// Extract location from job description for strict filtering
+		const locationMatch = jobDescription.match(/\b(Toronto|Vancouver|Calgary|Edmonton|Ottawa|Montreal|Winnipeg|Halifax|Victoria|BC|Ontario|Alberta|Quebec|Canada|USA|New York|San Francisco|Seattle|Boston|Chicago|Los Angeles|Austin|Denver|Miami|Atlanta)\b/gi);
+		const detectedLocation = locationMatch ? [...new Set(locationMatch)].join(', ') : null;
+
 		const geoContext = geographicFocus?.length
 			? `Focus on these regions: ${geographicFocus.join(', ')}`
-			: 'Search across Canada and USA';
+			: detectedLocation
+				? `STRICT LOCATION: Only search for candidates in or near ${detectedLocation}`
+				: 'Search across Canada and USA';
+
+		const locationRule = flexibleLocation
+			? 'Location is flexible - include nearby regions'
+			: detectedLocation
+				? `CRITICAL: Every query MUST include "${detectedLocation}" - only find candidates in this specific location`
+				: '';
 
 		const excludeContext = excludeEmployer
 			? `CRITICAL: Exclude anyone currently at "${excludeEmployer}"`
@@ -140,24 +153,17 @@ Output: "Marketing Director Canada SaaS software B2B experience"`;
 Job: ${jobDescription}
 
 ${geoContext}
+${locationRule}
 ${excludeContext}
 
 Generate 3-5 different search queries that will find RECRUITABLE external candidates:
 
 RULES:
-1. Focus on similar roles at OTHER organizations (not ${excludeEmployer})
-2. Include geographic locations: "Toronto", "Vancouver", "BC", "Ontario", "USA"
-3. Look for comparable institutions (BC Cancer, Cancer Care Ontario, MD Anderson, Mayo Clinic)
-4. Use different job title variations (VP, Director, Managing Director, Chief)
-5. Include both clinical and administrative leadership titles
-6. Each query should target different candidate pools
-
-EXAMPLES for Managing Director Cancer Care Alberta:
-- "Executive Director cancer care BC Cancer Vancouver leadership"
-- "VP oncology Cancer Care Ontario Toronto healthcare"
-- "Cancer services director USA health system MD Anderson"
-- "Chief medical officer oncology hospital Canada -Alberta"
-- "Cancer center administrator MBA healthcare executive"
+1. Focus on similar roles at OTHER organizations${excludeEmployer ? ` (not ${excludeEmployer})` : ''}
+2. ${detectedLocation && !flexibleLocation ? `MANDATORY: Include "${detectedLocation}" in EVERY query` : 'Include geographic locations from the job description'}
+3. Use different job title variations (VP, Director, Managing Director, Chief, Senior, Lead)
+4. Each query should target different candidate pools
+5. Keep queries specific and targeted
 
 Return ONLY a JSON array of 3-5 search query strings.`;
 

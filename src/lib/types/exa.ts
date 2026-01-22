@@ -41,6 +41,9 @@ export interface SearchFilters {
 
 	/** Minimum years of experience */
 	minYearsExperience?: number;
+
+	/** Allow flexible location matching (default: false = strict) */
+	flexibleLocation?: boolean;
 }
 
 export interface SearchResult {
