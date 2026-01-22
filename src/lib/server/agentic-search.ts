@@ -204,6 +204,7 @@ export class AgenticSearchService {
 
 		// Step 1: Generate multiple queries if not provided (first search)
 		if (searchQueries.length === 0) {
+			const queryGenStart = Date.now();
 			console.log('Generating recruitment queries...');
 
 			// Generate queries directly - skip separate refinement for speed
@@ -217,17 +218,22 @@ export class AgenticSearchService {
 			searchQueries.push(...generated);
 			queriesGenerated = true;
 
-			console.log(`Generated ${searchQueries.length} search queries:`, searchQueries);
+			console.log(`Generated ${searchQueries.length} queries in ${Date.now() - queryGenStart}ms:`, searchQueries);
 		}
 
 		// Step 2: Run all queries in parallel for this page
+		const searchStart = Date.now();
 		console.log(`Searching page ${page} with ${searchQueries.length} queries...`);
 
-		const searchPromises = searchQueries.map(query =>
-			this.exa.searchPeople(query, { page, numResults: 20 })
+		const searchPromises = searchQueries.map((query, i) =>
+			this.exa.searchPeople(query, { page, numResults: 20 }).then(r => {
+				console.log(`Query ${i + 1} completed in ${Date.now() - searchStart}ms`);
+				return r;
+			})
 		);
 
 		const allResults = await Promise.all(searchPromises);
+		console.log(`All ${searchQueries.length} Exa searches completed in ${Date.now() - searchStart}ms`);
 
 		// Step 3: Flatten and deduplicate by URL
 		const seenUrls = new Set<string>();
