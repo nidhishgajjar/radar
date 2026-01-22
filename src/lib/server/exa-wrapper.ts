@@ -1,34 +1,49 @@
-import Exa from 'exa-js';
 import { EXA_API_KEY } from '$env/static/private';
 import { ExaError, ExaErrorType, type SearchResponse } from '$lib/types/exa';
 
 export class ExaWrapper {
-	private client: Exa;
+	private apiKey: string;
+	private baseUrl = 'https://api.exa.ai';
 
 	constructor() {
 		if (!EXA_API_KEY) {
 			throw new Error('EXA_API_KEY environment variable is required');
 		}
-		this.client = new Exa(EXA_API_KEY);
+		this.apiKey = EXA_API_KEY;
 	}
 
+	// Direct fetch for true parallel execution (no shared client state)
 	async searchPeople(
 		query: string,
 		options?: { page?: number; numResults?: number }
 	): Promise<SearchResponse> {
 		try {
 			const numResults = options?.numResults || 20;
-			const page = options?.page || 1;
 
-			const results = await this.client.searchAndContents(query, {
-				category: 'people',
-				numResults,
-				text: true,
-				type: 'auto',
-				...(page > 1 && { startCrawlDate: undefined, page })
+			const response = await fetch(`${this.baseUrl}/search`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'x-api-key': this.apiKey
+				},
+				body: JSON.stringify({
+					query,
+					category: 'people',
+					numResults,
+					text: true,
+					type: 'auto',
+					contents: {
+						text: true
+					}
+				})
 			});
 
-			return results as SearchResponse;
+			if (!response.ok) {
+				const error = await response.json().catch(() => ({}));
+				throw { status: response.status, message: error.message || response.statusText };
+			}
+
+			return await response.json() as SearchResponse;
 		} catch (error: any) {
 			throw this.handleError(error);
 		}
