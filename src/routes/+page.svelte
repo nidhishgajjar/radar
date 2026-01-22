@@ -232,7 +232,7 @@
 					</p>
 				{/if}
 				<p class="results-count">
-					{results.length >= 20 ? '20+' : results.length} {results.length === 1 ? 'result' : 'results'}
+					{results.length} {results.length === 1 ? 'result' : 'results'}
 				</p>
 				{#if filteringInProgress}
 					<div class="filtering-indicator">
@@ -272,25 +272,6 @@
 						<button class="chip" onclick={() => handleSearch('Data scientists with machine learning experience')}>
 							Data scientists with machine learning experience
 						</button>
-					</div>
-					<div class="smart-search-hint">
-						<p class="hint-label">Smart search powered by AI:</p>
-						<div class="hint-items">
-							<div class="hint-item">
-								<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-									<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-								</svg>
-								<span>Paste a job posting URL</span>
-							</div>
-							<div class="hint-item">
-								<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
-									<polyline points="14 2 14 8 20 8"></polyline>
-								</svg>
-								<span>Enter a full job description</span>
-							</div>
-						</div>
 					</div>
 				</div>
 			</div>
@@ -504,40 +485,6 @@
 
 	.chip:active {
 		transform: scale(0.98);
-	}
-
-	.smart-search-hint {
-		margin-top: 32px;
-		padding-top: 32px;
-		border-top: 1px solid rgba(0, 0, 0, 0.06);
-	}
-
-	.hint-label {
-		color: #1d1d1f;
-		font-size: 15px;
-		font-weight: 500;
-		margin: 0 0 12px 0;
-		letter-spacing: -0.022em;
-	}
-
-	.hint-items {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-
-	.hint-item {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		color: #86868b;
-		font-size: 14px;
-		letter-spacing: -0.022em;
-	}
-
-	.hint-item svg {
-		flex-shrink: 0;
-		color: #007aff;
 	}
 
 	.load-more-container {
