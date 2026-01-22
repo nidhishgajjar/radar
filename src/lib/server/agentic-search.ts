@@ -51,7 +51,7 @@ export class AgenticSearchService {
 		return keywordMatches >= 3;
 	}
 
-	async processJobURL(url: string): Promise<string> {
+	async fetchJobContent(url: string): Promise<string | null> {
 		try {
 			// Fetch the job posting content
 			const response = await fetch(url, {
@@ -62,7 +62,7 @@ export class AgenticSearchService {
 
 			if (!response.ok) {
 				console.error('Failed to fetch job URL:', response.status);
-				return url; // Fallback to treating URL as search query
+				return null;
 			}
 
 			const html = await response.text();
@@ -75,12 +75,11 @@ export class AgenticSearchService {
 				.replace(/\s+/g, ' ')
 				.trim();
 
-			// Extract requirements using LLM
-			const query = await this.openRouter.extractRequirementsFromJob(textContent);
-			return query;
+			// Return first 4000 chars (enough for LLM to understand the job)
+			return textContent.substring(0, 4000);
 		} catch (error) {
-			console.error('Error processing job URL:', error);
-			return url; // Fallback to original URL
+			console.error('Error fetching job URL:', error);
+			return null;
 		}
 	}
 
@@ -207,33 +206,21 @@ export class AgenticSearchService {
 			const queryGenStart = Date.now();
 			console.log('Generating recruitment queries...');
 
-			let processedQuery = userQuery;
+			let jobContent = userQuery;
 
-			// Check if input is a URL - if so, extract job requirements first
+			// Check if input is a URL - fetch the job content
 			if (this.isURL(userQuery)) {
-				console.log('Detected job URL, extracting requirements...');
-				try {
-					processedQuery = await this.processJobURL(userQuery);
-					console.log('Extracted job requirements:', processedQuery.substring(0, 200));
-				} catch (error) {
-					console.error('Failed to process job URL:', error);
-					// Fall back to using URL as query (won't work well but better than nothing)
-				}
-			}
-			// Check if input is a job description
-			else if (this.isJobDescription(userQuery)) {
-				console.log('Detected job description, extracting requirements...');
-				try {
-					processedQuery = await this.openRouter.extractRequirementsFromJob(userQuery);
-					console.log('Extracted requirements:', processedQuery);
-				} catch (error) {
-					console.error('Failed to extract from job description:', error);
+				console.log('Detected job URL, fetching content...');
+				const content = await this.fetchJobContent(userQuery);
+				if (content) {
+					jobContent = content;
+					console.log('Fetched job content:', content.substring(0, 200) + '...');
 				}
 			}
 
-			// Generate queries from the processed query
+			// Generate queries directly from content (one LLM call)
 			const generated = await this.openRouter.generateRecruitmentQueries(
-				processedQuery,
+				jobContent,
 				filters?.excludeCurrentEmployer,
 				filters?.geographicFocus,
 				filters?.flexibleLocation ?? false
