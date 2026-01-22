@@ -1,0 +1,132 @@
+@import 'tailwindcss';
+
+/* Apple-like Global Styles */
+
+* {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	margin: 0;
+	font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'Roboto',
+		'Helvetica Neue', sans-serif;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	background: #ffffff;
+	color: #1d1d1f;
+	line-height: 1.47059;
+	font-size: 17px;
+	letter-spacing: -0.022em;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	font-weight: 600;
+	line-height: 1.1;
+	letter-spacing: -0.03em;
+}
+
+/* Minimal scrollbar */
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: rgba(0, 0, 0, 0.1);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: rgba(0, 0, 0, 0.2);
+}
+
+/* Clean focus states */
+*:focus-visible {
+	outline: 2px solid #007aff;
+	outline-offset: 2px;
+}
+
+/* Selection color */
+::selection {
+	background: rgba(0, 122, 255, 0.15);
+	color: #1d1d1f;
+}
+
+/* Markdown styles */
+.markdown {
+	line-height: 1.6;
+	color: #1d1d1f;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+	margin-top: 1.5em;
+	margin-bottom: 0.5em;
+	font-weight: 600;
+	color: #1d1d1f;
+}
+
+.markdown p {
+	margin-bottom: 1em;
+}
+
+.markdown ul,
+.markdown ol {
+	margin-left: 1.5em;
+	margin-bottom: 1em;
+}
+
+.markdown li {
+	margin-bottom: 0.5em;
+}
+
+.markdown code {
+	background: #f5f5f7;
+	padding: 0.2em 0.4em;
+	border-radius: 3px;
+	font-size: 0.9em;
+	font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+	color: #007aff;
+}
+
+.markdown pre {
+	background: #f5f5f7;
+	padding: 1em;
+	border-radius: 8px;
+	overflow-x: auto;
+	margin-bottom: 1em;
+}
+
+.markdown pre code {
+	background: none;
+	padding: 0;
+	color: #1d1d1f;
+}
+
+.markdown a {
+	color: #007aff;
+	text-decoration: none;
+}
+
+.markdown a:hover {
+	text-decoration: underline;
+}
+
+.markdown blockquote {
+	border-left: 3px solid #d2d2d7;
+	padding-left: 1em;
+	color: #86868b;
+	margin-bottom: 1em;
+}
