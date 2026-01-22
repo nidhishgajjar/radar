@@ -278,47 +278,32 @@ Return ONLY a JSON array of 4 search strings. Use title variations (Senior, Lead
 		reasoning: string;
 		recentlyLeft?: boolean;
 	}> {
-		const systemPrompt = `You are screening a LinkedIn profile for executive recruitment.
+		// Use faster model for filtering (high volume)
+		const fastModel = 'google/gemini-2.0-flash-001';
 
+		// Simplified prompt for speed
+		const prompt = `Analyze LinkedIn profile for job fit.
 Job: ${jobDescription}
-${excludeEmployer ? `Exclude current employees of: ${excludeEmployer}` : ''}
-${minYearsExperience ? `Minimum experience: ${minYearsExperience} years` : ''}
+${excludeEmployer ? `Exclude if at: ${excludeEmployer}` : ''}
 
-Analyze this LinkedIn profile and return JSON with:
-{
-  "currentEmployer": "Company name or null",
-  "isExternal": true/false (false if currently at ${excludeEmployer}),
-  "fitScore": 0-100,
-  "reasoning": "Brief explanation",
-  "recentlyLeft": true/false (if left within 6 months)
-}
+Profile:
+${profile.substring(0, 1500)}
 
-DISQUALIFY (fitScore 0) if:
-- Currently works at ${excludeEmployer}
-- Less than ${minYearsExperience || 10} years total experience
-- No relevant healthcare/cancer care leadership
-
-SCORING:
-- 80-100: Excellent fit - strong cancer care + senior leadership + external
-- 60-79: Good fit - relevant healthcare leadership + external
-- 40-59: Moderate fit - some relevant experience
-- 0-39: Poor fit - insufficient experience or current employee
-
-Return ONLY valid JSON.`;
+Return JSON: {"currentEmployer":"name or null","isExternal":true/false,"fitScore":0-100,"reasoning":"brief"}`;
 
 		const request: OpenRouterRequest = {
-			model: this.model,
+			model: fastModel,
 			messages: [
-				{ role: 'system', content: systemPrompt },
-				{ role: 'user', content: profile }
+				{ role: 'user', content: prompt }
 			],
-			temperature: 0.2,
-			max_tokens: 150
+			temperature: 0.1,
+			max_tokens: 100
 		};
 
 		try {
 			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+			// Longer timeout for filtering (15s) since we run many in parallel
+			const timeoutId = setTimeout(() => controller.abort(), 15000);
 
 			const response = await fetch(`${this.baseUrl}/chat/completions`, {
 				method: 'POST',
