@@ -207,9 +207,33 @@ export class AgenticSearchService {
 			const queryGenStart = Date.now();
 			console.log('Generating recruitment queries...');
 
-			// Generate queries directly - skip separate refinement for speed
+			let processedQuery = userQuery;
+
+			// Check if input is a URL - if so, extract job requirements first
+			if (this.isURL(userQuery)) {
+				console.log('Detected job URL, extracting requirements...');
+				try {
+					processedQuery = await this.processJobURL(userQuery);
+					console.log('Extracted job requirements:', processedQuery.substring(0, 200));
+				} catch (error) {
+					console.error('Failed to process job URL:', error);
+					// Fall back to using URL as query (won't work well but better than nothing)
+				}
+			}
+			// Check if input is a job description
+			else if (this.isJobDescription(userQuery)) {
+				console.log('Detected job description, extracting requirements...');
+				try {
+					processedQuery = await this.openRouter.extractRequirementsFromJob(userQuery);
+					console.log('Extracted requirements:', processedQuery);
+				} catch (error) {
+					console.error('Failed to extract from job description:', error);
+				}
+			}
+
+			// Generate queries from the processed query
 			const generated = await this.openRouter.generateRecruitmentQueries(
-				userQuery,
+				processedQuery,
 				filters?.excludeCurrentEmployer,
 				filters?.geographicFocus,
 				filters?.flexibleLocation ?? false
