@@ -4,10 +4,12 @@
 	import SearchBar from '../components/SearchBar.svelte';
 	import PersonCard from '../components/PersonCard.svelte';
 	import ProfileModal from '../components/ProfileModal.svelte';
+	import SubscribeModal from '../components/SubscribeModal.svelte';
 	import LoadingState from '../components/LoadingState.svelte';
 	import EmptyState from '../components/EmptyState.svelte';
 	import ErrorMessage from '../components/ErrorMessage.svelte';
 	import type { SearchResult } from '$lib/types/exa';
+	import { subscription } from '$lib/stores/subscription.svelte';
 
 	let query = $state('');
 	let results: SearchResult[] = $state([]);
@@ -163,6 +165,12 @@
 	}
 
 	async function handleLoadMore() {
+		// Check subscription status - free users can't load more
+		if (!subscription.isPremium) {
+			subscription.openModal();
+			return;
+		}
+
 		if (!query || loadingMore) return;
 
 		loadingMore = true;
@@ -350,6 +358,10 @@
 
 {#if selectedPerson}
 	<ProfileModal person={selectedPerson} onClose={closeProfile} />
+{/if}
+
+{#if subscription.showModal}
+	<SubscribeModal onClose={() => subscription.closeModal()} />
 {/if}
 
 <style>
