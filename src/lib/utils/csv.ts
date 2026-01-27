@@ -104,22 +104,26 @@ function escapeCSVValue(value: string): string {
 
 /**
  * Generate CSV content from search results
- * Columns: Name, Title, Company, LinkedIn URL, Fit Score, Key Highlights
+ * Columns: Qualified, Name, Title, Company, LinkedIn URL, Fit Score, Recently Left, Key Highlights
  */
 export function generateCSV(results: SearchResult[]): string {
-	const headers = ['Name', 'Title', 'Company', 'LinkedIn URL', 'Fit Score', 'Key Highlights'];
+	const headers = ['Qualified', 'Name', 'Title', 'Company', 'LinkedIn URL', 'Fit Score', 'Recently Left', 'Key Highlights'];
 
 	const rows = results.map((result) => {
 		const { name, title, company } = parsePersonDetails(result.title);
+		const qualified = result.filterMetadata?.qualified ? 'Yes' : 'No';
 		const fitScore = result.filterMetadata?.fitScore ?? result.score ?? '';
+		const recentlyLeft = result.filterMetadata?.recentlyLeft ? 'Yes' : '';
 		const highlights = result.highlights?.slice(0, 3).join('; ') ?? '';
 
 		return [
+			escapeCSVValue(qualified),
 			escapeCSVValue(name),
 			escapeCSVValue(title),
 			escapeCSVValue(company),
 			escapeCSVValue(result.url),
 			escapeCSVValue(String(fitScore)),
+			escapeCSVValue(recentlyLeft),
 			escapeCSVValue(highlights)
 		].join(',');
 	});

@@ -87,6 +87,7 @@ export interface SearchResult {
 		fitScore: number;
 		reasoning: string;
 		recentlyLeft?: boolean;
+		qualified?: boolean;
 	};
 }
 

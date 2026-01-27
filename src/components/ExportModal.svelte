@@ -1,9 +1,6 @@
 <script lang="ts">
 	import type { SearchFilters } from '$lib/types/exa';
 
-	const TIERS = [20, 50, 100, 250, 500] as const;
-	type Tier = (typeof TIERS)[number];
-
 	let {
 		query,
 		currentResultCount,
@@ -17,10 +14,9 @@
 		searchQueries: string[];
 		filters: SearchFilters;
 		onClose: () => void;
-		onExportStarted: (jobId: string, tier: number) => void;
+		onExportStarted: (jobId: string) => void;
 	} = $props();
 
-	let selectedTier = $state<Tier>(50);
 	let isSubmitting = $state(false);
 	let error = $state<string | null>(null);
 
@@ -50,7 +46,6 @@
 				},
 				body: JSON.stringify({
 					query,
-					tier: selectedTier,
 					searchQueries,
 					filters
 				})
@@ -62,7 +57,7 @@
 			}
 
 			const { jobId } = await response.json();
-			onExportStarted(jobId, selectedTier);
+			onExportStarted(jobId);
 			onClose();
 		} catch (err: unknown) {
 			error = err instanceof Error ? err.message : 'Failed to start export';
@@ -97,7 +92,7 @@
 		<div class="modal-header">
 			<h2 class="modal-title">Export to CSV</h2>
 			<p class="modal-subtitle">
-				Select how many candidates to export. More candidates take longer to process.
+				Export all unique candidates found. Qualified candidates appear first.
 			</p>
 		</div>
 
@@ -107,19 +102,20 @@
 				<span class="count">{currentResultCount} candidates</span>
 			</div>
 
-			<div class="tier-section">
-				<span class="section-label">Export size</span>
-				<div class="tier-options">
-					{#each TIERS as tier}
-						<button
-							class="tier-button"
-							class:selected={selectedTier === tier}
-							onclick={() => (selectedTier = tier)}
-						>
-							<span class="tier-count">{tier}</span>
-							<span class="tier-label">candidates</span>
-						</button>
-					{/each}
+			<div class="export-info">
+				<div class="info-item">
+					<span class="info-icon qualified">✓</span>
+					<div class="info-text">
+						<span class="info-label">Qualified candidates</span>
+						<span class="info-desc">Pass job fit filter, sorted by score</span>
+					</div>
+				</div>
+				<div class="info-item">
+					<span class="info-icon other">○</span>
+					<div class="info-text">
+						<span class="info-label">Other candidates</span>
+						<span class="info-desc">Unique profiles that didn't pass filter</span>
+					</div>
 				</div>
 			</div>
 
@@ -140,7 +136,7 @@
 					<line x1="12" y1="8" x2="12.01" y2="8"></line>
 				</svg>
 				<span>
-					Export will run in the background. You'll be notified when it's ready to download.
+					Searches exhaustively for all available candidates. You'll be notified when ready.
 				</span>
 			</div>
 
@@ -188,7 +184,7 @@
 						<polyline points="7 10 12 15 17 10"></polyline>
 						<line x1="12" y1="15" x2="12" y2="3"></line>
 					</svg>
-					Export {selectedTier} Candidates
+					Export All Candidates
 				{/if}
 			</button>
 		</div>
@@ -297,61 +293,60 @@
 		font-weight: 600;
 	}
 
-	.tier-section {
+	.export-info {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
 		margin-bottom: 20px;
+		padding: 16px;
+		background: #f5f5f7;
+		border-radius: 12px;
 	}
 
-	.section-label {
-		display: block;
+	.info-item {
+		display: flex;
+		align-items: flex-start;
+		gap: 12px;
+	}
+
+	.info-icon {
+		width: 20px;
+		height: 20px;
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 12px;
+		font-weight: 700;
+		flex-shrink: 0;
+		margin-top: 2px;
+	}
+
+	.info-icon.qualified {
+		background: #34c759;
+		color: white;
+	}
+
+	.info-icon.other {
+		background: #e8e8ed;
+		color: #86868b;
+	}
+
+	.info-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.info-label {
 		color: #1d1d1f;
 		font-size: 14px;
 		font-weight: 600;
-		margin-bottom: 12px;
-		user-select: none;
 	}
 
-	.tier-options {
-		display: grid;
-		grid-template-columns: repeat(5, 1fr);
-		gap: 8px;
-	}
-
-	.tier-button {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		padding: 14px 8px;
-		background: #f5f5f7;
-		border: 2px solid transparent;
-		border-radius: 12px;
-		cursor: pointer;
-		transition: all 0.2s ease;
-	}
-
-	.tier-button:hover {
-		background: #e8e8ed;
-	}
-
-	.tier-button.selected {
-		background: rgba(0, 122, 255, 0.08);
-		border-color: #007aff;
-	}
-
-	.tier-count {
-		color: #1d1d1f;
-		font-size: 18px;
-		font-weight: 700;
-		line-height: 1;
-	}
-
-	.tier-button.selected .tier-count {
-		color: #007aff;
-	}
-
-	.tier-label {
+	.info-desc {
 		color: #86868b;
-		font-size: 11px;
-		margin-top: 4px;
+		font-size: 12px;
 	}
 
 	.info-box {
@@ -463,10 +458,6 @@
 	}
 
 	@media (max-width: 540px) {
-		.tier-options {
-			grid-template-columns: repeat(3, 1fr);
-		}
-
 		.modal-footer {
 			flex-direction: column;
 		}

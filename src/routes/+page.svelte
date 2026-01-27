@@ -64,7 +64,7 @@
 		showExportModal = false;
 	}
 
-	async function handleExportStarted(jobId: string, tier: number) {
+	async function handleExportStarted(jobId: string) {
 		activeExportJobId = jobId;
 		exportProgress = 0;
 		exportHistory.setActiveJob(jobId);
@@ -76,15 +76,15 @@
 
 		// Show progress toast
 		toast = {
-			message: `Exporting ${tier} candidates...`,
+			message: 'Exporting all candidates...',
 			type: 'progress'
 		};
 
 		// Start polling
-		pollExportStatus(jobId, tier);
+		pollExportStatus(jobId);
 	}
 
-	async function pollExportStatus(jobId: string, tier: number) {
+	async function pollExportStatus(jobId: string) {
 		const pollInterval = setInterval(async () => {
 			try {
 				const response = await fetch(`/api/export/${jobId}`);
@@ -116,13 +116,14 @@
 
 					// Add to history
 					const filename = generateFilename(query, data.resultCount);
-					exportHistory.addExport(query, tier, data.resultCount, filename);
+					const qualifiedCount = data.stats?.totalPassedFilter || data.resultCount;
+					exportHistory.addExport(query, qualifiedCount, data.resultCount, filename);
 					exportHistory.setActiveJob(null);
 					activeExportJobId = null;
 
 					// Show success toast with download link and stats
 					toast = {
-						message: `Export ready: ${data.resultCount}/${tier} candidates`,
+						message: `Export ready: ${qualifiedCount} qualified, ${data.resultCount} total`,
 						type: 'success',
 						downloadUrl: `/api/export/${jobId}?download=true`,
 						stats: data.stats
@@ -393,12 +394,24 @@
 			<EmptyState {query} />
 		{:else if results.length > 0}
 			<div class="results-section">
+				<div class="results-header">
+					<div class="results-info">
+						<span class="results-count">{results.length} candidates</span>
+						{#if filteringInProgress}
+							<span class="results-status">· Analyzing {filterProgress}%</span>
+						{/if}
+					</div>
+					<button class="export-button-top" onclick={openExportModal}>
+						<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+							<polyline points="7 10 12 15 17 10"></polyline>
+							<line x1="12" y1="15" x2="12" y2="3"></line>
+						</svg>
+						Export CSV
+					</button>
+				</div>
 				{#if filteringInProgress}
 					<div class="filtering-indicator">
-						<div class="filtering-status">
-							<div class="filtering-spinner"></div>
-							<span>Analyzing candidates... {filterProgress}%</span>
-						</div>
 						<div class="filtering-progress-bar">
 							<div class="filtering-progress-fill" style="width: {filterProgress}%"></div>
 						</div>
@@ -634,6 +647,56 @@
 		background: linear-gradient(90deg, #0071e3 0%, #0077ed 100%);
 		border-radius: 3px;
 		transition: width 0.3s ease;
+	}
+
+	.results-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 16px;
+		padding: 0 4px;
+	}
+
+	.results-info {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.results-count {
+		color: #1d1d1f;
+		font-size: 15px;
+		font-weight: 600;
+	}
+
+	.results-status {
+		color: #0071e3;
+		font-size: 14px;
+		font-weight: 500;
+	}
+
+	.export-button-top {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 14px;
+		background: #f5f5f7;
+		border: 1px solid rgba(0, 0, 0, 0.08);
+		border-radius: 8px;
+		color: #1d1d1f;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.export-button-top:hover {
+		background: #e8e8ed;
+		border-color: rgba(0, 0, 0, 0.12);
+	}
+
+	.export-button-top:active {
+		transform: scale(0.98);
 	}
 
 	.results-grid {
