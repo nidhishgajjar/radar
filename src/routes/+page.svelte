@@ -27,6 +27,7 @@
 	let hasMore = $state(false);
 	let queries: string[] = $state([]);
 	let flexibleLocation = $state(false);
+	let searchMode = $state<'search' | 'export'>('search');
 
 	// Two-phase loading state
 	let searchId = $state<string | null>(null);
@@ -158,8 +159,16 @@
 		toast = null;
 	}
 
-	async function handleSearch(searchQuery: string) {
+	async function handleSearch(searchQuery: string, mode: 'search' | 'export' = 'search') {
 		query = searchQuery;
+
+		// If export mode, go directly to export flow
+		if (mode === 'export') {
+			await handleDirectExport(searchQuery);
+			return;
+		}
+
+		// Normal search mode - quick preview
 		loading = true;
 		error = null;
 		hasSearched = true;
@@ -178,6 +187,7 @@
 				body: JSON.stringify({
 					query: searchQuery,
 					page: 1,
+					mode: 'search', // 25 results per query
 					filters: {
 						externalOnly: true,
 						includeRecentDepartures: true,
@@ -207,6 +217,63 @@
 		} catch (err: any) {
 			error = err.message || 'An error occurred while searching';
 			results = [];
+		} finally {
+			loading = false;
+		}
+	}
+
+	// Direct export mode - skips UI preview, goes straight to exhaustive export
+	async function handleDirectExport(searchQuery: string) {
+		loading = true;
+		error = null;
+		hasSearched = true;
+
+		try {
+			// Show progress toast
+			toast = {
+				message: 'Starting exhaustive export...',
+				type: 'progress'
+			};
+
+			// Request notification permission if not already granted
+			if ('Notification' in window && Notification.permission === 'default') {
+				await Notification.requestPermission();
+			}
+
+			// Start export directly (API will generate queries and do exhaustive search)
+			const response = await fetch('/api/export', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					query: searchQuery,
+					filters: {
+						externalOnly: true,
+						includeRecentDepartures: true,
+						flexibleLocation
+					}
+				})
+			});
+
+			const data = await response.json();
+
+			if (!response.ok) {
+				throw new Error(data.error || 'Export failed');
+			}
+
+			// Start polling for export status
+			activeExportJobId = data.jobId;
+			exportProgress = 0;
+			exportHistory.setActiveJob(data.jobId);
+			pollExportStatus(data.jobId);
+
+		} catch (err: any) {
+			error = err.message || 'An error occurred while starting export';
+			toast = {
+				message: err.message || 'Export failed',
+				type: 'error'
+			};
 		} finally {
 			loading = false;
 		}
@@ -384,7 +451,7 @@
 			<p class="subtitle">Talent intelligence for smarter hiring</p>
 		</header>
 
-		<SearchBar bind:value={query} bind:flexibleLocation={flexibleLocation} onSearch={handleSearch} />
+		<SearchBar bind:value={query} bind:flexibleLocation={flexibleLocation} bind:searchMode={searchMode} onSearch={handleSearch} />
 
 		{#if loading}
 			<LoadingState />

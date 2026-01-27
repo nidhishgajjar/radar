@@ -8,7 +8,7 @@ const agenticSearch = new AgenticSearchService();
 
 export const POST: RequestHandler = async ({ request }) => {
 	try {
-		const { query, page = 1, queries, filters } = await request.json();
+		const { query, page = 1, queries, filters, mode = 'search' } = await request.json();
 
 		// Validate input
 		if (!query || typeof query !== 'string') {
@@ -21,13 +21,19 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		const searchFilters: SearchFilters | undefined = filters;
 
+		// Determine results per query based on mode
+		// Search mode: 25 per query (100 total) - quick preview
+		// Export mode: 100 per query (400 total) - exhaustive
+		const numResultsPerQuery = mode === 'export' ? 100 : 25;
+
 		// Use searchRaw() for immediate results (2-3 seconds)
 		// Returns deduplicated results WITHOUT LLM filtering
 		const searchResult = await agenticSearch.searchRaw(
 			query,
 			page,
 			queries,
-			searchFilters
+			searchFilters,
+			numResultsPerQuery
 		);
 
 		// Start background filtering if filters are enabled

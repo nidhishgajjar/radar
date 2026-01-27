@@ -1,5 +1,6 @@
 <script lang="ts">
-	let { value = $bindable(''), flexibleLocation = $bindable(false), onSearch }: { value: string; flexibleLocation: boolean; onSearch: (query: string) => void } = $props();
+	type SearchMode = 'search' | 'export';
+	let { value = $bindable(''), flexibleLocation = $bindable(false), searchMode = $bindable<SearchMode>('search'), onSearch }: { value: string; flexibleLocation: boolean; searchMode: SearchMode; onSearch: (query: string, mode: SearchMode) => void } = $props();
 
 	// Detect input mode
 	type InputMode = 'search' | 'url' | 'jd';
@@ -54,14 +55,14 @@
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			if (value.length >= 3) {
-				onSearch(value);
+				onSearch(value, searchMode);
 			}
 		}
 	}
 
 	function handleSubmit() {
 		if (value.length >= 3) {
-			onSearch(value);
+			onSearch(value, searchMode);
 		}
 	}
 </script>
@@ -165,11 +166,34 @@
 				<input type="checkbox" bind:checked={flexibleLocation} />
 				<span class="toggle-label">Flexible location</span>
 			</label>
-			{#if inputMode() !== 'search' && value.length > 0}
-				<div class="mode-badge" style="background: {currentMode.color}15; color: {currentMode.color}">
-					{currentMode.label} detected
-				</div>
-			{/if}
+
+			<div class="search-mode-toggle">
+				<button
+					type="button"
+					class="mode-toggle-btn"
+					class:active={searchMode === 'search'}
+					onclick={() => searchMode = 'search'}
+				>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<circle cx="11" cy="11" r="8"></circle>
+						<path d="m21 21-4.35-4.35"></path>
+					</svg>
+					Search
+				</button>
+				<button
+					type="button"
+					class="mode-toggle-btn"
+					class:active={searchMode === 'export'}
+					onclick={() => searchMode = 'export'}
+				>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+						<polyline points="7 10 12 15 17 10"></polyline>
+						<line x1="12" y1="15" x2="12" y2="3"></line>
+					</svg>
+					Export
+				</button>
+			</div>
 		</div>
 	</div>
 </div>
@@ -318,14 +342,43 @@
 		color: #1d1d1f;
 	}
 
-	.mode-badge {
-		display: inline-flex;
+
+	.search-mode-toggle {
+		display: flex;
+		background: #f5f5f7;
+		border-radius: 8px;
+		padding: 2px;
+		gap: 2px;
+	}
+
+	.mode-toggle-btn {
+		display: flex;
 		align-items: center;
-		margin: 0 16px 12px;
-		padding: 4px 10px;
+		gap: 5px;
+		padding: 6px 12px;
+		border: none;
 		border-radius: 6px;
+		background: transparent;
+		color: #86868b;
 		font-size: 12px;
-		font-weight: 600;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.15s ease;
+		font-family: inherit;
+	}
+
+	.mode-toggle-btn:hover {
+		color: #1d1d1f;
+	}
+
+	.mode-toggle-btn.active {
+		background: #ffffff;
+		color: #1d1d1f;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+	}
+
+	.mode-toggle-btn.active:last-child {
+		color: #007aff;
 	}
 
 	@media (max-width: 640px) {

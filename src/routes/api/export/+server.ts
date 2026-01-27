@@ -16,9 +16,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			return json({ error: 'Query is required' }, { status: 400 });
 		}
 
-		if (!searchQueries || !Array.isArray(searchQueries) || searchQueries.length === 0) {
-			return json({ error: 'Search queries are required' }, { status: 400 });
-		}
+		// searchQueries is now optional - will be generated if not provided
 
 		// Create export job (tier=0 means export all)
 		const jobId = crypto.randomUUID();
@@ -48,10 +46,24 @@ export const POST: RequestHandler = async ({ request }) => {
 async function processExport(
 	jobId: string,
 	query: string,
-	searchQueries: string[],
+	searchQueries?: string[],
 	filters?: SearchFilters
 ) {
 	try {
+		let queriesToUse = searchQueries || [];
+
+		// If no queries provided, generate them first (direct export mode)
+		if (queriesToUse.length === 0) {
+			exportStateManager.updateStatus(jobId, 'generating_queries', 2);
+			console.log(`[Export ${jobId}] Generating search queries...`);
+
+			// Use searchRaw to generate queries (it will create them if not provided)
+			const initialSearch = await agenticSearch.searchRaw(query, 1, undefined, filters, 1);
+			queriesToUse = initialSearch.queries;
+
+			console.log(`[Export ${jobId}] Generated ${queriesToUse.length} queries`);
+		}
+
 		exportStateManager.updateStatus(jobId, 'fetching', 5);
 
 		// Target a large number to get all available candidates
@@ -62,7 +74,7 @@ async function processExport(
 		const bulkResult = await agenticSearch.searchBulk(
 			query,
 			targetCount,
-			searchQueries,
+			queriesToUse,
 			filters,
 			({ totalRaw, unique, round }) => {
 				// Update progress during fetching (5-40%)

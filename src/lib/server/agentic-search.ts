@@ -201,12 +201,15 @@ export class AgenticSearchService {
 	 * Search for people and return raw deduplicated results immediately.
 	 * Does NOT apply LLM filtering - returns results in 2-3 seconds.
 	 * Use this for instant feedback while filtering runs in background.
+	 *
+	 * @param numResultsPerQuery - Results per query (default: 25 for quick preview, 100 for exhaustive)
 	 */
 	async searchRaw(
 		userQuery: string,
 		page: number = 1,
 		providedQueries?: string[],
-		filters?: SearchFilters
+		filters?: SearchFilters,
+		numResultsPerQuery: number = 25
 	) {
 		const searchQueries: string[] = providedQueries || [];
 		let queriesGenerated = false;
@@ -243,12 +246,12 @@ export class AgenticSearchService {
 			console.log(`Generated ${searchQueries.length} queries in ${Date.now() - queryGenStart}ms:`, searchQueries);
 		}
 
-		// Step 2: Run all queries in parallel (100 results each, Exa max)
+		// Step 2: Run all queries in parallel
 		const searchStart = Date.now();
-		console.log(`Searching with ${searchQueries.length} queries (100 results each)...`);
+		console.log(`Searching with ${searchQueries.length} queries (${numResultsPerQuery} results each)...`);
 
 		const searchPromises = searchQueries.map((query, i) =>
-			this.exa.searchPeople(query, { numResults: 100 }).then(r => {
+			this.exa.searchPeople(query, { numResults: numResultsPerQuery }).then(r => {
 				console.log(`Query ${i + 1} completed in ${Date.now() - searchStart}ms with ${r.results.length} results`);
 				return r;
 			})
