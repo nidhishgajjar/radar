@@ -1,5 +1,6 @@
 import { EXA_API_KEY } from '$env/static/private';
 import { ExaError, ExaErrorType, type SearchResponse } from '$lib/types/exa';
+import { withRetry } from '$lib/utils/retry';
 
 export class ExaWrapper {
 	private apiKey: string;
@@ -13,20 +14,17 @@ export class ExaWrapper {
 	}
 
 	// Direct fetch for true parallel execution (no shared client state)
+	// Exa uses cursor-based pagination, not offset
 	async searchPeople(
 		query: string,
-		options?: { page?: number; numResults?: number }
+		options?: { numResults?: number; cursor?: string }
 	): Promise<SearchResponse> {
-		try {
-			const numResults = options?.numResults || 20;
+		// Exa max is 100 results per request
+		const numResults = Math.min(options?.numResults || 100, 100);
 
-			const response = await fetch(`${this.baseUrl}/search`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'x-api-key': this.apiKey
-				},
-				body: JSON.stringify({
+		return withRetry(
+			async () => {
+				const requestBody: Record<string, unknown> = {
 					query,
 					category: 'people',
 					numResults,
@@ -35,18 +33,44 @@ export class ExaWrapper {
 					contents: {
 						text: true
 					}
-				})
-			});
+				};
 
-			if (!response.ok) {
-				const error = await response.json().catch(() => ({}));
-				throw { status: response.status, message: error.message || response.statusText };
+				// Add cursor for pagination if provided
+				if (options?.cursor) {
+					requestBody.cursor = options.cursor;
+				}
+
+				const response = await fetch(`${this.baseUrl}/search`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'x-api-key': this.apiKey
+					},
+					body: JSON.stringify(requestBody)
+				});
+
+				if (!response.ok) {
+					const error = await response.json().catch(() => ({}));
+					throw this.handleError({ status: response.status, message: error.message || response.statusText });
+				}
+
+				return await response.json() as SearchResponse;
+			},
+			{
+				maxRetries: 3,
+				initialDelayMs: 1000,
+				retryableErrors: (error) => {
+					// Retry on rate limits, server errors, and network issues
+					if (error instanceof ExaError) {
+						return [ExaErrorType.RATE_LIMIT, ExaErrorType.SERVER_ERROR, ExaErrorType.NETWORK, ExaErrorType.TIMEOUT].includes(error.type);
+					}
+					return error?.status === 429 || (error?.status >= 500 && error?.status < 600);
+				},
+				onRetry: (attempt, error, delayMs) => {
+					console.log(`[Exa] Retry ${attempt}/3 after ${delayMs}ms:`, error?.message || error);
+				}
 			}
-
-			return await response.json() as SearchResponse;
-		} catch (error: any) {
-			throw this.handleError(error);
-		}
+		);
 	}
 
 	private handleError(error: any): ExaError {

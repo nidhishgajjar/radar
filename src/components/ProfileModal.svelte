@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { SearchResult } from '$lib/types/exa';
 	import { renderMarkdown } from '$lib/utils/markdown';
-	import { subscription } from '$lib/stores/subscription.svelte';
 
 	let { person, onClose }: { person: SearchResult; onClose: () => void } = $props();
 
@@ -40,22 +39,6 @@
 	}
 
 	const { name, role } = parseTitle(person.title);
-
-	// Extract first name only for free users
-	const displayName = subscription.isPremium
-		? name
-		: name.split(' ')[0];
-
-	function handleLinkedInClick(e: MouseEvent) {
-		if (!subscription.isPremium) {
-			e.preventDefault();
-			subscription.openModal();
-		}
-	}
-
-	function handleSubscribe() {
-		subscription.openModal();
-	}
 </script>
 
 <svelte:window onkeydown={handleEscape} />
@@ -84,97 +67,62 @@
 					{/if}
 				</div>
 				<div class="header-text">
-					<h2 class="modal-title">
-						{displayName}
-						{#if !subscription.isPremium}
-							<svg class="lock-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-								<path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-							</svg>
-						{/if}
-					</h2>
+					<h2 class="modal-title">{name}</h2>
 					{#if role}
 						<p class="modal-role">{role}</p>
 					{/if}
 				</div>
 			</div>
-			{#if subscription.isPremium}
-				<a href={person.url} target="_blank" rel="noopener noreferrer" class="linkedin-header-link" aria-label="View LinkedIn profile">
-					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#0077B5">
-						<path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-					</svg>
-				</a>
-			{/if}
+			<a href={person.url} target="_blank" rel="noopener noreferrer" class="linkedin-header-link" aria-label="View LinkedIn profile">
+				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#0077B5">
+					<path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+				</svg>
+			</a>
 		</div>
 
 		<div class="modal-body">
-			{#if subscription.isPremium}
-				{#if person.url}
-					<div class="info-section">
-						<h3 class="section-title">Profile</h3>
-						<a href={person.url} target="_blank" rel="noopener noreferrer" class="profile-url">
-							{person.url}
-							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-								<polyline points="15 3 21 3 21 9"></polyline>
-								<line x1="10" y1="14" x2="21" y2="3"></line>
-							</svg>
-						</a>
-					</div>
-				{/if}
-
-				{#if person.highlights && person.highlights.length > 0}
-					<div class="highlights-section">
-						<h3 class="section-title">Key Highlights</h3>
-						<ul class="highlights-list">
-							{#each person.highlights as highlight}
-								<li class="highlight-item">{highlight}</li>
-							{/each}
-						</ul>
-					</div>
-				{/if}
-
-				{#if person.text}
-					<div class="profile-content">
-						<h3 class="section-title">Full Profile</h3>
-						<div class="markdown">
-							{@html renderMarkdown(person.text)}
-						</div>
-					</div>
-				{/if}
-
-				<div class="modal-footer">
-					<a href={person.url} target="_blank" rel="noopener noreferrer" class="linkedin-button">
-						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-							<path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+			{#if person.url}
+				<div class="info-section">
+					<h3 class="section-title">Profile</h3>
+					<a href={person.url} target="_blank" rel="noopener noreferrer" class="profile-url">
+						{person.url}
+						<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+							<polyline points="15 3 21 3 21 9"></polyline>
+							<line x1="10" y1="14" x2="21" y2="3"></line>
 						</svg>
-						View LinkedIn Profile
 					</a>
 				</div>
-			{:else}
-				<!-- Free user view - locked content -->
-				<div class="locked-section">
-					<div class="locked-icon-wrapper">
-						<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-							<path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-						</svg>
-					</div>
-					<h3 class="locked-title">Full Profile Details Locked</h3>
-					<p class="locked-description">
-						Upgrade to Premium to access complete candidate profiles including:
-					</p>
-					<ul class="locked-features">
-						<li>Full name and contact information</li>
-						<li>LinkedIn profile URL</li>
-						<li>Email and phone details</li>
-						<li>Complete work history and skills</li>
+			{/if}
+
+			{#if person.highlights && person.highlights.length > 0}
+				<div class="highlights-section">
+					<h3 class="section-title">Key Highlights</h3>
+					<ul class="highlights-list">
+						{#each person.highlights as highlight}
+							<li class="highlight-item">{highlight}</li>
+						{/each}
 					</ul>
-					<button class="subscribe-cta" onclick={handleSubscribe}>
-						Unlock Full Profile
-					</button>
 				</div>
 			{/if}
+
+			{#if person.text}
+				<div class="profile-content">
+					<h3 class="section-title">Full Profile</h3>
+					<div class="markdown">
+						{@html renderMarkdown(person.text)}
+					</div>
+				</div>
+			{/if}
+
+			<div class="modal-footer">
+				<a href={person.url} target="_blank" rel="noopener noreferrer" class="linkedin-button">
+					<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+						<path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+					</svg>
+					View LinkedIn Profile
+				</a>
+			</div>
 		</div>
 	</div>
 </div>
@@ -295,14 +243,6 @@
 		margin: 0 0 6px 0;
 		line-height: 1.2;
 		letter-spacing: -0.04em;
-		display: flex;
-		align-items: center;
-		gap: 10px;
-	}
-
-	.lock-icon {
-		color: #86868b;
-		flex-shrink: 0;
 	}
 
 	.modal-role {
@@ -423,92 +363,6 @@
 
 	.linkedin-button:active {
 		transform: scale(0.98);
-	}
-
-	.locked-section {
-		text-align: center;
-		padding: 60px 40px;
-		background: #f5f5f7;
-		border-radius: 12px;
-	}
-
-	.locked-icon-wrapper {
-		margin-bottom: 24px;
-	}
-
-	.locked-icon-wrapper svg {
-		color: #007aff;
-	}
-
-	.locked-title {
-		color: #1d1d1f;
-		font-size: 24px;
-		font-weight: 700;
-		margin: 0 0 12px 0;
-		letter-spacing: -0.04em;
-	}
-
-	.locked-description {
-		color: #86868b;
-		font-size: 15px;
-		margin: 0 0 24px 0;
-		letter-spacing: -0.022em;
-		line-height: 1.6;
-	}
-
-	.locked-features {
-		list-style: none;
-		padding: 0;
-		margin: 0 0 32px 0;
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		text-align: left;
-		max-width: 400px;
-		margin-left: auto;
-		margin-right: auto;
-	}
-
-	.locked-features li {
-		color: #1d1d1f;
-		font-size: 15px;
-		padding: 12px 16px 12px 40px;
-		background: white;
-		border-radius: 8px;
-		position: relative;
-		letter-spacing: -0.022em;
-	}
-
-	.locked-features li::before {
-		content: '✓';
-		position: absolute;
-		left: 16px;
-		color: #007aff;
-		font-weight: 700;
-	}
-
-	.subscribe-cta {
-		background: linear-gradient(135deg, #007aff 0%, #0051d5 100%);
-		color: white;
-		border: none;
-		padding: 16px 32px;
-		border-radius: 12px;
-		font-weight: 600;
-		font-size: 17px;
-		cursor: pointer;
-		transition: all 0.2s ease;
-		letter-spacing: -0.022em;
-		font-family: inherit;
-		box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
-	}
-
-	.subscribe-cta:hover {
-		transform: translateY(-2px);
-		box-shadow: 0 8px 20px rgba(0, 122, 255, 0.4);
-	}
-
-	.subscribe-cta:active {
-		transform: translateY(0);
 	}
 
 	@media (max-width: 768px) {

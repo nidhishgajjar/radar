@@ -51,6 +51,17 @@ export class AgenticSearchService {
 		return keywordMatches >= 3;
 	}
 
+	/**
+	 * Process a job URL: fetch content and extract search query
+	 */
+	async processJobURL(url: string): Promise<string> {
+		const content = await this.fetchJobContent(url);
+		if (!content) {
+			throw new Error('Failed to fetch job URL content');
+		}
+		return await this.openRouter.extractRequirementsFromJob(content);
+	}
+
 	async fetchJobContent(url: string): Promise<string | null> {
 		try {
 			// Fetch the job posting content
@@ -232,13 +243,13 @@ export class AgenticSearchService {
 			console.log(`Generated ${searchQueries.length} queries in ${Date.now() - queryGenStart}ms:`, searchQueries);
 		}
 
-		// Step 2: Run all queries in parallel for this page
+		// Step 2: Run all queries in parallel (100 results each, Exa max)
 		const searchStart = Date.now();
-		console.log(`Searching page ${page} with ${searchQueries.length} queries...`);
+		console.log(`Searching with ${searchQueries.length} queries (100 results each)...`);
 
 		const searchPromises = searchQueries.map((query, i) =>
-			this.exa.searchPeople(query, { page, numResults: 20 }).then(r => {
-				console.log(`Query ${i + 1} completed in ${Date.now() - searchStart}ms`);
+			this.exa.searchPeople(query, { numResults: 100 }).then(r => {
+				console.log(`Query ${i + 1} completed in ${Date.now() - searchStart}ms with ${r.results.length} results`);
 				return r;
 			})
 		);
@@ -360,9 +371,12 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 		const externalResults = filteredResults.filter(result => {
 			if (!result.filterMetadata) return false;
 
-			// Apply filters
+			// Apply external-only filter
 			if (filters?.externalOnly && !result.filterMetadata.isExternal) {
-				return false;
+				// Exception: include if they recently left and includeRecentDepartures is true
+				if (!(filters?.includeRecentDepartures && result.filterMetadata.recentlyLeft)) {
+					return false;
+				}
 			}
 
 			// Minimum fit score threshold
@@ -373,14 +387,20 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 			return true;
 		});
 
-		// Sort by fit score
+		// Sort: recentlyLeft first, then by fit score
 		externalResults.sort((a, b) => {
+			// Recently left candidates get priority
+			const aRecent = a.filterMetadata?.recentlyLeft ? 1 : 0;
+			const bRecent = b.filterMetadata?.recentlyLeft ? 1 : 0;
+			if (aRecent !== bRecent) return bRecent - aRecent;
+
+			// Then by fit score
 			const scoreA = a.filterMetadata?.fitScore || 0;
 			const scoreB = b.filterMetadata?.fitScore || 0;
 			return scoreB - scoreA;
 		});
 
-		console.log(`Filtered to ${externalResults.length} external candidates`);
+		console.log(`Filtered to ${externalResults.length} candidates (recentlyLeft prioritized)`);
 
 		return {
 			results: externalResults,
@@ -388,6 +408,123 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 				total_results_before_filter: results.length,
 				total_results_after_filter: externalResults.length,
 				filtering_applied: true
+			}
+		};
+	}
+
+	/**
+	 * Bulk search for export - exhaustively fetches results using cursor pagination.
+	 * Keeps going until Exa is exhausted or we have enough filtered results.
+	 * Returns detailed stats about the search process.
+	 */
+	async searchBulk(
+		userQuery: string,
+		targetCount: number,
+		providedQueries: string[],
+		filters?: SearchFilters,
+		onProgress?: (stats: { totalRaw: number; unique: number; round: number }) => void
+	): Promise<{
+		results: SearchResult[];
+		stats: {
+			totalRawSearched: number;
+			totalAfterDedup: number;
+			rounds: number;
+			searchExhausted: boolean;
+			stopReason: 'target_reached' | 'search_exhausted' | 'diminishing_returns';
+		};
+	}> {
+		const seenUrls = new Set<string>();
+		const allResults: SearchResult[] = [];
+		const searchQueries = providedQueries;
+
+		// Track cursors per query for pagination
+		const cursors: (string | undefined)[] = searchQueries.map(() => undefined);
+		let hasMore = true;
+		let round = 0;
+		let totalRawSearched = 0;
+		let consecutiveLowYieldRounds = 0;
+		let stopReason: 'target_reached' | 'search_exhausted' | 'diminishing_returns' = 'search_exhausted';
+
+		// Keep fetching until exhausted - no arbitrary round limit
+		while (hasMore) {
+			round++;
+			console.log(`[Bulk Search] Round ${round}: Fetching with ${searchQueries.length} queries...`);
+
+			// Run all queries in parallel with their respective cursors
+			const searchPromises = searchQueries.map((query, i) =>
+				this.exa.searchPeople(query, { numResults: 100, cursor: cursors[i] }).then(r => {
+					// Update cursor for next round
+					cursors[i] = r.nextCursor;
+					return { results: r.results, queryIndex: i, hasMore: !!r.nextCursor };
+				}).catch(err => {
+					console.error(`Query ${i + 1} failed:`, err);
+					return { results: [], queryIndex: i, hasMore: false };
+				})
+			);
+
+			const responses = await Promise.all(searchPromises);
+
+			// Count raw results before dedup
+			const rawThisRound = responses.reduce((sum, r) => sum + r.results.length, 0);
+			totalRawSearched += rawThisRound;
+
+			// Check if any query has more results
+			hasMore = responses.some(r => r.hasMore);
+
+			// Deduplicate and add results
+			let newResults = 0;
+			for (const response of responses) {
+				for (const result of response.results) {
+					if (!seenUrls.has(result.url)) {
+						seenUrls.add(result.url);
+						allResults.push(result);
+						newResults++;
+					}
+				}
+			}
+
+			console.log(`[Bulk Search] Round ${round}: Raw ${rawThisRound}, New unique ${newResults}, Total unique ${allResults.length}, HasMore: ${hasMore}`);
+
+			if (onProgress) {
+				onProgress({ totalRaw: totalRawSearched, unique: allResults.length, round });
+			}
+
+			// Check if we have enough (with buffer for filtering losses)
+			if (allResults.length >= targetCount * 1.5) {
+				stopReason = 'target_reached';
+				console.log(`[Bulk Search] Target reached with buffer (${allResults.length} >= ${targetCount * 1.5})`);
+				break;
+			}
+
+			// Track diminishing returns - stop if 3 consecutive rounds with <5% new results
+			if (rawThisRound > 0 && newResults / rawThisRound < 0.05) {
+				consecutiveLowYieldRounds++;
+				if (consecutiveLowYieldRounds >= 3) {
+					stopReason = 'diminishing_returns';
+					console.log(`[Bulk Search] Stopping - 3 consecutive low yield rounds`);
+					break;
+				}
+			} else {
+				consecutiveLowYieldRounds = 0;
+			}
+
+			// If no more results from any query
+			if (!hasMore) {
+				stopReason = 'search_exhausted';
+				console.log(`[Bulk Search] Search exhausted - no more results from Exa`);
+			}
+		}
+
+		console.log(`[Bulk Search] Complete: ${allResults.length} unique from ${totalRawSearched} raw after ${round} rounds. Reason: ${stopReason}`);
+
+		return {
+			results: allResults,
+			stats: {
+				totalRawSearched,
+				totalAfterDedup: allResults.length,
+				rounds: round,
+				searchExhausted: !hasMore,
+				stopReason
 			}
 		};
 	}
@@ -425,11 +562,11 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 			console.log(`Generated ${searchQueries.length} search queries:`, searchQueries);
 		}
 
-		// Step 2: Run all queries in parallel for this page
-		console.log(`Searching page ${page} with ${searchQueries.length} queries...`);
+		// Step 2: Run all queries in parallel (100 results each, Exa max)
+		console.log(`Searching with ${searchQueries.length} queries (100 results each)...`);
 
 		const searchPromises = searchQueries.map(query =>
-			this.exa.searchPeople(query, { page, numResults: 20 })
+			this.exa.searchPeople(query, { numResults: 100 })
 		);
 
 		const allResults = await Promise.all(searchPromises);
@@ -493,9 +630,12 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 			const externalResults = filteredResults.filter(result => {
 				if (!result.filterMetadata) return false;
 
-				// Apply filters
+				// Apply external-only filter
 				if (filters?.externalOnly && !result.filterMetadata.isExternal) {
-					return false;
+					// Exception: include if they recently left and includeRecentDepartures is true
+					if (!(filters?.includeRecentDepartures && result.filterMetadata.recentlyLeft)) {
+						return false;
+					}
 				}
 
 				// Minimum fit score threshold
@@ -506,14 +646,20 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 				return true;
 			});
 
-			// Sort by fit score
+			// Sort: recentlyLeft first, then by fit score
 			externalResults.sort((a, b) => {
+				// Recently left candidates get priority
+				const aRecent = a.filterMetadata?.recentlyLeft ? 1 : 0;
+				const bRecent = b.filterMetadata?.recentlyLeft ? 1 : 0;
+				if (aRecent !== bRecent) return bRecent - aRecent;
+
+				// Then by fit score
 				const scoreA = a.filterMetadata?.fitScore || 0;
 				const scoreB = b.filterMetadata?.fitScore || 0;
 				return scoreB - scoreA;
 			});
 
-			console.log(`Filtered to ${externalResults.length} external candidates`);
+			console.log(`Filtered to ${externalResults.length} candidates (recentlyLeft prioritized)`);
 
 			return {
 				results: externalResults,

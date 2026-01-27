@@ -9,6 +9,7 @@ import {
 	OPENROUTER_MODEL,
 	OPENROUTER_TIMEOUT_MS
 } from '$env/static/private';
+import { withRetry } from '$lib/utils/retry';
 
 export class OpenRouterClient {
 	private apiKey: string;
@@ -23,6 +24,75 @@ export class OpenRouterClient {
 		this.apiKey = OPENROUTER_API_KEY;
 		this.model = OPENROUTER_MODEL || 'x-ai/grok-4.1-fast';
 		this.timeout = parseInt(OPENROUTER_TIMEOUT_MS || '5000');
+	}
+
+	/**
+	 * Make an API request with retry logic for rate limits and transient errors
+	 */
+	private async fetchWithRetry(request: OpenRouterRequest, timeoutMs?: number): Promise<OpenRouterResponse> {
+		const requestTimeout = timeoutMs || this.timeout;
+		return withRetry(
+			async () => {
+				const controller = new AbortController();
+				const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
+
+				try {
+					const response = await fetch(`${this.baseUrl}/chat/completions`, {
+						method: 'POST',
+						headers: {
+							Authorization: `Bearer ${this.apiKey}`,
+							'Content-Type': 'application/json',
+							'HTTP-Referer': 'https://radar.jobs.ca',
+							'X-Title': 'Radar by jobs.ca'
+						},
+						body: JSON.stringify(request),
+						signal: controller.signal
+					});
+
+					clearTimeout(timeoutId);
+
+					if (!response.ok) {
+						throw await this.handleErrorResponse(response);
+					}
+
+					return await response.json() as OpenRouterResponse;
+				} catch (error) {
+					clearTimeout(timeoutId);
+
+					if (error instanceof OpenRouterError) {
+						throw error;
+					}
+
+					if (error instanceof Error && error.name === 'AbortError') {
+						throw new OpenRouterError('Request timeout', OpenRouterErrorType.TIMEOUT);
+					}
+
+					throw new OpenRouterError(
+						`Network error: ${error instanceof Error ? error.message : 'Unknown'}`,
+						OpenRouterErrorType.NETWORK
+					);
+				}
+			},
+			{
+				maxRetries: 3,
+				initialDelayMs: 1000,
+				retryableErrors: (error) => {
+					if (error instanceof OpenRouterError) {
+						return [
+							OpenRouterErrorType.RATE_LIMIT,
+							OpenRouterErrorType.MODEL_OVERLOADED,
+							OpenRouterErrorType.SERVER_ERROR,
+							OpenRouterErrorType.NETWORK,
+							OpenRouterErrorType.TIMEOUT
+						].includes(error.type);
+					}
+					return false;
+				},
+				onRetry: (attempt, error, delayMs) => {
+					console.log(`[OpenRouter] Retry ${attempt}/3 after ${delayMs}ms:`, error?.message || error);
+				}
+			}
+		);
 	}
 
 	async refineQuery(userQuery: string): Promise<string> {
@@ -57,69 +127,24 @@ Output: "Marketing Director Canada SaaS software B2B experience"`;
 			max_tokens: 100
 		};
 
-		try {
-			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+		const data = await this.fetchWithRetry(request);
 
-			const response = await fetch(`${this.baseUrl}/chat/completions`, {
-				method: 'POST',
-				headers: {
-					Authorization: `Bearer ${this.apiKey}`,
-					'Content-Type': 'application/json',
-					'HTTP-Referer': 'https://radar.jobs.ca',
-					'X-Title': 'Radar by jobs.ca'
-				},
-				body: JSON.stringify(request),
-				signal: controller.signal
-			});
-
-			clearTimeout(timeoutId);
-
-			if (!response.ok) {
-				throw await this.handleErrorResponse(response);
-			}
-
-			const data: OpenRouterResponse = await response.json();
-
-			if (!data.choices || data.choices.length === 0) {
-				throw new OpenRouterError(
-					'No response from model',
-					OpenRouterErrorType.SERVER_ERROR
-				);
-			}
-
-			const refinedQuery = data.choices[0].message.content.trim();
-
-			// Validate the refined query
-			if (refinedQuery.length === 0 || refinedQuery.length > 200) {
-				console.warn('Invalid refined query length, using original');
-				return userQuery;
-			}
-
-			return refinedQuery;
-		} catch (error) {
-			if (error instanceof OpenRouterError) {
-				throw error;
-			}
-
-			if (error instanceof Error) {
-				if (error.name === 'AbortError') {
-					throw new OpenRouterError(
-						'Request timeout',
-						OpenRouterErrorType.TIMEOUT
-					);
-				}
-				throw new OpenRouterError(
-					`Network error: ${error.message}`,
-					OpenRouterErrorType.NETWORK
-				);
-			}
-
+		if (!data.choices || data.choices.length === 0) {
 			throw new OpenRouterError(
-				'Unknown error occurred',
+				'No response from model',
 				OpenRouterErrorType.SERVER_ERROR
 			);
 		}
+
+		const refinedQuery = data.choices[0].message.content.trim();
+
+		// Validate the refined query
+		if (refinedQuery.length === 0 || refinedQuery.length > 200) {
+			console.warn('Invalid refined query length, using original');
+			return userQuery;
+		}
+
+		return refinedQuery;
 	}
 
 	async generateRecruitmentQueries(
@@ -178,28 +203,7 @@ Return ONLY a JSON array of 4 search query strings.`;
 		};
 
 		try {
-			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
-			const response = await fetch(`${this.baseUrl}/chat/completions`, {
-				method: 'POST',
-				headers: {
-					Authorization: `Bearer ${this.apiKey}`,
-					'Content-Type': 'application/json',
-					'HTTP-Referer': 'https://radar.jobs.ca',
-					'X-Title': 'Radar by jobs.ca'
-				},
-				body: JSON.stringify(request),
-				signal: controller.signal
-			});
-
-			clearTimeout(timeoutId);
-
-			if (!response.ok) {
-				throw await this.handleErrorResponse(response);
-			}
-
-			const data: OpenRouterResponse = await response.json();
+			const data = await this.fetchWithRetry(request);
 
 			if (!data.choices || data.choices.length === 0) {
 				throw new OpenRouterError(
@@ -253,7 +257,14 @@ ${excludeEmployer ? `Exclude if at: ${excludeEmployer}` : ''}
 Profile:
 ${profile.substring(0, 1500)}
 
-Return JSON: {"currentEmployer":"name or null","isExternal":true/false,"fitScore":0-100,"reasoning":"brief"}`;
+Analyze:
+1. currentEmployer: Their CURRENT company (or null if unclear/unemployed)
+2. isExternal: true if NOT currently at the hiring company
+3. fitScore: 0-100 based on skills/experience match
+4. recentlyLeft: true if they show "Former" or left a relevant role in last 6 months (look for dates like "2024", "Present" endings)
+5. reasoning: Brief explanation
+
+Return JSON only: {"currentEmployer":"name or null","isExternal":true/false,"fitScore":0-100,"recentlyLeft":true/false,"reasoning":"brief"}`;
 
 		const request: OpenRouterRequest = {
 			model: this.model, // Grok Fast
@@ -265,29 +276,8 @@ Return JSON: {"currentEmployer":"name or null","isExternal":true/false,"fitScore
 		};
 
 		try {
-			const controller = new AbortController();
 			// Longer timeout for filtering (15s) since we run many in parallel
-			const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-			const response = await fetch(`${this.baseUrl}/chat/completions`, {
-				method: 'POST',
-				headers: {
-					Authorization: `Bearer ${this.apiKey}`,
-					'Content-Type': 'application/json',
-					'HTTP-Referer': 'https://radar.jobs.ca',
-					'X-Title': 'Radar by jobs.ca'
-				},
-				body: JSON.stringify(request),
-				signal: controller.signal
-			});
-
-			clearTimeout(timeoutId);
-
-			if (!response.ok) {
-				throw await this.handleErrorResponse(response);
-			}
-
-			const data: OpenRouterResponse = await response.json();
+			const data = await this.fetchWithRetry(request, 15000);
 
 			if (!data.choices || data.choices.length === 0) {
 				throw new OpenRouterError(
@@ -365,69 +355,24 @@ Output: "Marketing Director B2B SaaS Vancouver growth marketing"`;
 			max_tokens: 150
 		};
 
-		try {
-			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+		const data = await this.fetchWithRetry(request);
 
-			const response = await fetch(`${this.baseUrl}/chat/completions`, {
-				method: 'POST',
-				headers: {
-					Authorization: `Bearer ${this.apiKey}`,
-					'Content-Type': 'application/json',
-					'HTTP-Referer': 'https://radar.jobs.ca',
-					'X-Title': 'Radar by jobs.ca'
-				},
-				body: JSON.stringify(request),
-				signal: controller.signal
-			});
-
-			clearTimeout(timeoutId);
-
-			if (!response.ok) {
-				throw await this.handleErrorResponse(response);
-			}
-
-			const data: OpenRouterResponse = await response.json();
-
-			if (!data.choices || data.choices.length === 0) {
-				throw new OpenRouterError(
-					'No response from model',
-					OpenRouterErrorType.SERVER_ERROR
-				);
-			}
-
-			const extractedQuery = data.choices[0].message.content.trim();
-
-			// Validate the extracted query
-			if (extractedQuery.length === 0 || extractedQuery.length > 200) {
-				console.warn('Invalid extracted query length, returning original');
-				return jobContent.substring(0, 200);
-			}
-
-			return extractedQuery;
-		} catch (error) {
-			if (error instanceof OpenRouterError) {
-				throw error;
-			}
-
-			if (error instanceof Error) {
-				if (error.name === 'AbortError') {
-					throw new OpenRouterError(
-						'Request timeout',
-						OpenRouterErrorType.TIMEOUT
-					);
-				}
-				throw new OpenRouterError(
-					`Network error: ${error.message}`,
-					OpenRouterErrorType.NETWORK
-				);
-			}
-
+		if (!data.choices || data.choices.length === 0) {
 			throw new OpenRouterError(
-				'Unknown error occurred',
+				'No response from model',
 				OpenRouterErrorType.SERVER_ERROR
 			);
 		}
+
+		const extractedQuery = data.choices[0].message.content.trim();
+
+		// Validate the extracted query
+		if (extractedQuery.length === 0 || extractedQuery.length > 200) {
+			console.warn('Invalid extracted query length, returning original');
+			return jobContent.substring(0, 200);
+		}
+
+		return extractedQuery;
 	}
 
 	private async handleErrorResponse(response: Response): Promise<OpenRouterError> {

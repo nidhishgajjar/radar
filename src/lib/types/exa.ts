@@ -99,6 +99,9 @@ export interface SearchResponse {
 
 	/** Search type used */
 	searchType: string;
+
+	/** Cursor for pagination - pass to next request to get more results */
+	nextCursor?: string;
 }
 
 export enum ExaErrorType {

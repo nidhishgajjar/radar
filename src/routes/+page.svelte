@@ -1,15 +1,19 @@
 <script lang="ts">
 	import { flip } from 'svelte/animate';
 	import { fade } from 'svelte/transition';
+	import { onMount } from 'svelte';
 	import SearchBar from '../components/SearchBar.svelte';
 	import PersonCard from '../components/PersonCard.svelte';
 	import ProfileModal from '../components/ProfileModal.svelte';
-	import SubscribeModal from '../components/SubscribeModal.svelte';
 	import LoadingState from '../components/LoadingState.svelte';
 	import EmptyState from '../components/EmptyState.svelte';
 	import ErrorMessage from '../components/ErrorMessage.svelte';
+	import ExportModal from '../components/ExportModal.svelte';
+	import Toast from '../components/Toast.svelte';
+	import type { ToastType } from '../components/Toast.svelte';
+	import { exportHistory } from '$lib/stores/export.svelte';
+	import { downloadCSV, generateFilename } from '$lib/utils/csv';
 	import type { SearchResult } from '$lib/types/exa';
-	import { subscription } from '$lib/stores/subscription.svelte';
 
 	let query = $state('');
 	let results: SearchResult[] = $state([]);
@@ -28,6 +32,130 @@
 	let searchId = $state<string | null>(null);
 	let filteringInProgress = $state(false);
 	let filterProgress = $state(0);
+
+	// Export state
+	let showExportModal = $state(false);
+	let activeExportJobId = $state<string | null>(null);
+	let exportProgress = $state(0);
+	let toast = $state<{ message: string; type: ToastType; downloadUrl?: string; stats?: { totalRawSearched: number; totalAfterDedup: number; totalPassedFilter: number; searchExhausted: boolean; stopReason: string } } | null>(null);
+
+	// Request notification permission on mount
+	onMount(() => {
+		if ('Notification' in window && Notification.permission === 'default') {
+			// We'll request permission when user first starts an export
+		}
+		// Initialize export history from localStorage
+		exportHistory.initialize();
+	});
+
+	// Global keyboard handler for Cmd+Enter
+	function handleGlobalKeydown(e: KeyboardEvent) {
+		if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && results.length > 0 && !showExportModal) {
+			e.preventDefault();
+			showExportModal = true;
+		}
+	}
+
+	function openExportModal() {
+		showExportModal = true;
+	}
+
+	function closeExportModal() {
+		showExportModal = false;
+	}
+
+	async function handleExportStarted(jobId: string, tier: number) {
+		activeExportJobId = jobId;
+		exportProgress = 0;
+		exportHistory.setActiveJob(jobId);
+
+		// Request notification permission if not already granted
+		if ('Notification' in window && Notification.permission === 'default') {
+			await Notification.requestPermission();
+		}
+
+		// Show progress toast
+		toast = {
+			message: `Exporting ${tier} candidates...`,
+			type: 'progress'
+		};
+
+		// Start polling
+		pollExportStatus(jobId, tier);
+	}
+
+	async function pollExportStatus(jobId: string, tier: number) {
+		const pollInterval = setInterval(async () => {
+			try {
+				const response = await fetch(`/api/export/${jobId}`);
+				const data = await response.json();
+
+				if (!response.ok) {
+					clearInterval(pollInterval);
+					toast = {
+						message: data.error || 'Export failed',
+						type: 'error'
+					};
+					activeExportJobId = null;
+					exportHistory.setActiveJob(null);
+					return;
+				}
+
+				exportProgress = data.progress || 0;
+
+				// Update progress toast
+				if (data.status !== 'ready' && data.status !== 'error') {
+					toast = {
+						message: `Exporting candidates... ${data.progress}%`,
+						type: 'progress'
+					};
+				}
+
+				if (data.status === 'ready') {
+					clearInterval(pollInterval);
+
+					// Add to history
+					const filename = generateFilename(query, data.resultCount);
+					exportHistory.addExport(query, tier, data.resultCount, filename);
+					exportHistory.setActiveJob(null);
+					activeExportJobId = null;
+
+					// Show success toast with download link and stats
+					toast = {
+						message: `Export ready: ${data.resultCount}/${tier} candidates`,
+						type: 'success',
+						downloadUrl: `/api/export/${jobId}?download=true`,
+						stats: data.stats
+					};
+
+					// Trigger download
+					window.open(`/api/export/${jobId}?download=true`, '_blank');
+
+					// Browser notification
+					if ('Notification' in window && Notification.permission === 'granted') {
+						new Notification('Export Ready', {
+							body: `${data.resultCount} candidates exported`,
+							icon: '/favicon.png'
+						});
+					}
+				} else if (data.status === 'error') {
+					clearInterval(pollInterval);
+					toast = {
+						message: data.error || 'Export failed',
+						type: 'error'
+					};
+					activeExportJobId = null;
+					exportHistory.setActiveJob(null);
+				}
+			} catch (err) {
+				console.error('Export polling error:', err);
+			}
+		}, 2000);
+	}
+
+	function closeToast() {
+		toast = null;
+	}
 
 	async function handleSearch(searchQuery: string) {
 		query = searchQuery;
@@ -51,6 +179,7 @@
 					page: 1,
 					filters: {
 						externalOnly: true,
+						includeRecentDepartures: true,
 						flexibleLocation
 					}
 				})
@@ -165,17 +294,13 @@
 	}
 
 	async function handleLoadMore() {
-		// Check subscription status - free users can't load more
-		if (!subscription.isPremium) {
-			subscription.openModal();
-			return;
-		}
-
 		if (!query || loadingMore) return;
 
 		loadingMore = true;
 		error = null;
 		const nextPage = currentPage + 1;
+
+		console.log(`[Load More] Requesting page ${nextPage}...`);
 
 		try {
 			const response = await fetch('/api/search/people', {
@@ -189,6 +314,7 @@
 					queries,
 					filters: {
 						externalOnly: true,
+						includeRecentDepartures: true,
 						flexibleLocation
 					}
 				})
@@ -201,14 +327,19 @@
 			}
 
 			const newResults: SearchResult[] = data.results || [];
+			console.log(`[Load More] Received ${newResults.length} results from API`);
 
 			// Filter out duplicates and append new results
 			const existingIds = new Set(results.map(r => r.id));
 			const uniqueNewResults = newResults.filter(r => !existingIds.has(r.id));
 
+			console.log(`[Load More] ${uniqueNewResults.length} unique new results (${newResults.length - uniqueNewResults.length} duplicates filtered)`);
+
 			results = [...results, ...uniqueNewResults];
 			currentPage = nextPage;
 			hasMore = uniqueNewResults.length > 0;
+
+			console.log(`[Load More] Total results now: ${results.length}, hasMore: ${hasMore}`);
 
 			// Start polling for Load More results if filtering is pending
 			if (data.status === 'filtering_pending' && data.searchId) {
@@ -243,6 +374,8 @@
 	<meta name="description" content="Find and connect with top talent across Canada using AI-powered search" />
 </svelte:head>
 
+<svelte:window onkeydown={handleGlobalKeydown} />
+
 <div class="page">
 	<div class="container">
 		<header class="header">
@@ -260,19 +393,6 @@
 			<EmptyState {query} />
 		{:else if results.length > 0}
 			<div class="results-section">
-				{#if metadata?.llm_used && metadata.refined_query !== metadata.original_query}
-					<p class="refined-query-info">
-						<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-							<polyline points="7 10 12 15 17 10"></polyline>
-							<line x1="12" y1="15" x2="12" y2="3"></line>
-						</svg>
-						Optimized search
-					</p>
-				{/if}
-				<p class="results-count">
-					{results.length} {results.length === 1 ? 'result' : 'results'}
-				</p>
 				{#if filteringInProgress}
 					<div class="filtering-indicator">
 						<div class="filtering-status">
@@ -291,10 +411,21 @@
 						</div>
 					{/each}
 				</div>
-				{#if hasMore}
+				{#if hasMore || results.length > 0}
 					<div class="load-more-container">
-						<button class="load-more-button" onclick={handleLoadMore} disabled={loadingMore}>
-							{loadingMore ? 'Loading...' : 'Load More'}
+						{#if hasMore}
+							<button class="load-more-button" onclick={handleLoadMore} disabled={loadingMore}>
+								{loadingMore ? 'Loading...' : 'Load More'}
+							</button>
+						{/if}
+						<button class="export-button-footer" onclick={openExportModal}>
+							<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+								<polyline points="7 10 12 15 17 10"></polyline>
+								<line x1="12" y1="15" x2="12" y2="3"></line>
+							</svg>
+							Export CSV
+							<span class="keyboard-hint">⌘+Enter</span>
 						</button>
 					</div>
 				{/if}
@@ -360,8 +491,27 @@
 	<ProfileModal person={selectedPerson} onClose={closeProfile} />
 {/if}
 
-{#if subscription.showModal}
-	<SubscribeModal onClose={() => subscription.closeModal()} />
+{#if showExportModal}
+	<ExportModal
+		{query}
+		currentResultCount={results.length}
+		searchQueries={queries}
+		filters={{ externalOnly: true, includeRecentDepartures: true, flexibleLocation }}
+		onClose={closeExportModal}
+		onExportStarted={handleExportStarted}
+	/>
+{/if}
+
+{#if toast}
+	<Toast
+		message={toast.message}
+		type={toast.type}
+		progress={exportProgress}
+		downloadUrl={toast.downloadUrl}
+		stats={toast.stats}
+		onClose={closeToast}
+		autoDismiss={toast.type !== 'progress'}
+	/>
 {/if}
 
 <style>
@@ -404,30 +554,41 @@
 	}
 
 	.results-section {
-		margin-top: 8px;
+		margin-top: 24px;
 	}
 
-	.refined-query-info {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		color: #007aff;
-		font-size: 13px;
-		font-weight: 500;
-		margin-bottom: 12px;
-		letter-spacing: -0.022em;
-	}
-
-	.refined-query-info svg {
-		flex-shrink: 0;
-	}
-
-	.results-count {
+	.keyboard-hint {
+		padding: 2px 6px;
+		background: rgba(0, 0, 0, 0.06);
+		border-radius: 4px;
+		font-size: 11px;
 		color: #86868b;
+		font-weight: 500;
+	}
+
+	.export-button-footer {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 12px 24px;
+		background: transparent;
+		border: 1px solid rgba(0, 0, 0, 0.12);
+		border-radius: 10px;
+		color: #1d1d1f;
 		font-size: 15px;
 		font-weight: 500;
-		margin-bottom: 24px;
-		letter-spacing: -0.022em;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		font-family: inherit;
+	}
+
+	.export-button-footer:hover {
+		background: rgba(0, 0, 0, 0.04);
+		border-color: rgba(0, 122, 255, 0.3);
+	}
+
+	.export-button-footer:active {
+		transform: scale(0.98);
 	}
 
 	.filtering-indicator {
@@ -533,7 +694,10 @@
 	}
 
 	.load-more-container {
-		text-align: center;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 16px;
 		margin-top: 32px;
 		padding-top: 32px;
 		border-top: 1px solid rgba(0, 0, 0, 0.06);
