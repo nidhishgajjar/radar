@@ -115,13 +115,49 @@ async function processExport(
 
 		console.log(`[Export ${jobId}] Bulk search complete: ${searchStats.totalRawSearched} raw → ${searchStats.totalAfterDedup} unique (${searchStats.stopReason})`);
 
-		// Always apply LLM filtering to categorize candidates
-		exportStateManager.updateStatus(jobId, 'filtering', 45);
+		// ========== NEW FLOW: Enrich BEFORE Filter ==========
+		// Step 1: Company enrichment for ALL candidates (so LLM can use company data for filtering)
+		exportStateManager.updateStatus(jobId, 'enriching', 45);
 
-		console.log(`[Export ${jobId}] Analyzing ${allResults.length} candidates with LLM...`);
+		// Extract unique company names from ALL results
+		const companyNames = allResults
+			.map(r => extractCompanyFromTitle(r.title))
+			.filter((c): c is string => !!c && c.length > 2);
 
-		// Use forceFilter=true to always run LLM filtering for export (get fit scores and key highlights)
-		// This returns ALL results with their filterMetadata, not just qualified ones
+		const uniqueCompanies = [...new Set(companyNames)];
+		let exaEnrichmentCost = 0;
+		const companyDataMap = new Map<string, SearchResult['companyData']>();
+
+		console.log(`[Export ${jobId}] Enriching ${uniqueCompanies.length} unique companies BEFORE filtering...`);
+
+		if (uniqueCompanies.length > 0) {
+			const enrichmentResult = await companyEnrichment.enrichCompanies(uniqueCompanies, { includeNews: false });
+			exaEnrichmentCost = enrichmentResult.stats.estimatedCost;
+			console.log(`[Export ${jobId}] Enriched ${enrichmentResult.stats.companiesFound}/${enrichmentResult.stats.companiesSearched} companies ($${exaEnrichmentCost.toFixed(3)})`);
+
+			// Build company data map and attach to results
+			for (const result of allResults) {
+				const company = extractCompanyFromTitle(result.title);
+				if (company) {
+					const normalizedKey = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+					const companyData = enrichmentResult.results.get(normalizedKey);
+					if (companyData) {
+						result.companyData = companyData;
+						companyDataMap.set(normalizedKey, companyData);
+					}
+				}
+			}
+		}
+
+		exportStateManager.updateProgress(jobId, 60, allResults.length);
+
+		// Step 2: LLM filtering WITH company data available
+		exportStateManager.updateStatus(jobId, 'filtering', 65);
+
+		console.log(`[Export ${jobId}] Analyzing ${allResults.length} candidates with LLM (company data available)...`);
+
+		// Use forceFilter=true to always run LLM filtering for export
+		// Results now have companyData attached, which the filter can use
 		const filterResult = await agenticSearch.filterResults(allResults, query, filters, undefined, true);
 
 		// All results now have filterMetadata. Mark qualified based on fit score threshold
@@ -138,7 +174,7 @@ async function processExport(
 			};
 		});
 
-		// Get qualified results for counting and company enrichment
+		// Get qualified results for counting
 		const qualifiedResults = allWithStatus.filter(r => r.filterMetadata?.qualified);
 
 		// Sort: qualified first (by recentlyLeft, then fitScore), then others
@@ -158,38 +194,6 @@ async function processExport(
 			const scoreB = b.filterMetadata?.fitScore || 0;
 			return scoreB - scoreA;
 		});
-
-		exportStateManager.updateProgress(jobId, 85, sortedResults.length);
-
-		// Run company enrichment for qualified candidates
-		console.log(`[Export ${jobId}] Enriching companies for ${qualifiedResults.length} qualified candidates...`);
-		exportStateManager.updateStatus(jobId, 'enriching', 87);
-
-		// Extract unique company names from qualified results
-		const companyNames = qualifiedResults
-			.map(r => r.filterMetadata?.currentEmployer || extractCompanyFromTitle(r.title))
-			.filter((c): c is string => !!c && c.length > 2);
-
-		const uniqueCompanies = [...new Set(companyNames)];
-		let exaEnrichmentCost = 0;
-
-		if (uniqueCompanies.length > 0) {
-			const enrichmentResult = await companyEnrichment.enrichCompanies(uniqueCompanies, { includeNews: false });
-			exaEnrichmentCost = enrichmentResult.stats.estimatedCost;
-			console.log(`[Export ${jobId}] Enriched ${enrichmentResult.stats.companiesFound}/${enrichmentResult.stats.companiesSearched} companies ($${exaEnrichmentCost.toFixed(3)})`);
-
-			// Add company data to results
-			for (const result of sortedResults) {
-				const company = result.filterMetadata?.currentEmployer || extractCompanyFromTitle(result.title);
-				if (company) {
-					const normalizedKey = company.toLowerCase().replace(/[^a-z0-9]/g, '');
-					const companyData = enrichmentResult.results.get(normalizedKey);
-					if (companyData) {
-						result.companyData = companyData;
-					}
-				}
-			}
-		}
 
 		exportStateManager.updateProgress(jobId, 92, sortedResults.length);
 

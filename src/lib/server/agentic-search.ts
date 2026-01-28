@@ -335,11 +335,20 @@ URL: ${result.url}
 ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 				`.trim();
 
+				// Pass company data if available (from prior enrichment step)
+				const companyData = result.companyData ? {
+					headcount: result.companyData.headcount,
+					revenue: result.companyData.revenue,
+					funding: result.companyData.funding,
+					industry: result.companyData.industry
+				} : undefined;
+
 				const filterResult = await this.openRouter.filterAndRankCandidate(
 					profileSummary,
 					userQuery,
 					filters?.excludeCurrentEmployer,
-					filters?.minYearsExperience
+					filters?.minYearsExperience,
+					companyData
 				);
 
 				result.filterMetadata = filterResult;

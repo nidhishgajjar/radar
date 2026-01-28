@@ -94,7 +94,7 @@ const NEWS_DOMAINS = [
 ];
 
 // Cost tracking
-const COST_PER_SEARCH = 0.005; // $5 per 1000 searches
+const COST_PER_SEARCH = 0.005; // $5 per 1000 searches (Exa pricing for <25 results)
 
 export class CompanyEnrichmentService {
 	private exa: Exa;
@@ -533,33 +533,27 @@ export class CompanyEnrichmentService {
 		let cacheHits = 0;
 		let found = 0;
 		let signalsFound = 0;
-		let completed = 0;
 
-		// Process in batches of 5 to avoid overwhelming API
-		const batchSize = 5;
-		for (let i = 0; i < uniqueCompanies.length; i += batchSize) {
-			const batch = uniqueCompanies.slice(i, i + batchSize);
+		// Process ALL companies in parallel (like LLM filtering)
+		console.log(`[Enrichment] Starting parallel enrichment for ${uniqueCompanies.length} companies...`);
 
-			const batchResults = await Promise.all(
-				batch.map(name => this.enrichCompany(name, includeNews))
-			);
+		const enrichPromises = uniqueCompanies.map(async (name, index) => {
+			const { data, searchCount: searches, cached } = await this.enrichCompany(name, includeNews);
+			return { name, data, searches, cached, index };
+		});
 
-			for (let j = 0; j < batch.length; j++) {
-				const { data, searchCount: searches, cached } = batchResults[j];
-				searchCount += searches;
-				if (cached) cacheHits++;
-				if (data && (data.headcount || data.revenue)) {
-					found++;
-					if (data.signals && Object.keys(data.signals).length > 0) {
-						signalsFound++;
-					}
-					results.set(this.normalizeCompanyName(batch[j]), data);
+		const allResults = await Promise.all(enrichPromises);
+
+		// Process results
+		for (const { name, data, searches, cached } of allResults) {
+			searchCount += searches;
+			if (cached) cacheHits++;
+			if (data && (data.headcount || data.revenue)) {
+				found++;
+				if (data.signals && Object.keys(data.signals).length > 0) {
+					signalsFound++;
 				}
-				completed++;
-			}
-
-			if (onProgress) {
-				onProgress({ completed, total: uniqueCompanies.length });
+				results.set(this.normalizeCompanyName(name), data);
 			}
 		}
 

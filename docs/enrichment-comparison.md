@@ -127,26 +127,37 @@ Radar uses AI to analyze every prospect and provide:
 |---|---|---|---|
 | **Pricing model** | Pay per use | Credits/month | Subscription |
 | **Monthly base** | $0 | $149-800/mo | $80-150/mo |
-| **500 prospects** | **~$2** | ~$150-250* | N/A (manual) |
-| **1000 prospects** | **~$4-6** | ~$300-500* | N/A |
+| **500 prospects** | **~$3-5** | ~$150-250* | N/A (manual) |
+| **1000 prospects** | **~$6-10** | ~$300-500* | N/A |
 | **What you get** | AI-qualified + enriched | Raw records to review | Profile lists |
 
 *Clay: 4-10 credits per record, Starter=$149/2K credits, Explorer=$349/10K credits*
 
-### Radar Cost Breakdown (verified from actual exports)
+### Radar Cost Breakdown
 
-| Component | Cost | Notes |
-|-----------|------|-------|
-| **Exa Search** | ~$1.10 | ~1100 raw profiles (11 queries × 100) |
-| **AI Filtering (Grok Fast)** | ~$0.41 | 804 candidates @ ~$0.0005 each |
-| **Company Enrichment** | ~$1.55 | ~310 unique companies @ ~$0.005 each |
-| **Total** | **~$3.06** | For 499 qualified prospects |
+**Exa API Pricing:**
+| Results per query | Cost per 1000 queries |
+|-------------------|----------------------|
+| < 25 results | $5 |
+| 25-100 results | $25 |
 
-**Cost per qualified prospect: ~$0.004-0.006**
+**LLM Pricing (Grok 4.1 Fast via OpenRouter):**
+- $0.20 per 1M input tokens
+- $0.50 per 1M output tokens
+- ~$0.0005 per candidate filtered
 
-*Example: "Senior React developer Toronto" export*
-- *Input: 1100 raw → 804 unique → 499 qualified*
-- *LLM: $0.41 | Exa: $1.55 | Total: ~$2*
+### Example Export: "Senior React Developer Toronto"
+
+| Component | Units | Rate | Cost |
+|-----------|-------|------|------|
+| **Candidate Search** | 11 queries × 100 results | $0.025/query | $0.28 |
+| **Company Enrichment** | 310 companies × 5 results | $0.005/search | $1.55 |
+| **AI Filtering** | 804 candidates | ~$0.0005/each | $0.41 |
+| **Total** | | | **$2.24** |
+
+**Result:** 804 unique → **499 qualified** prospects
+
+**Cost per qualified prospect: ~$0.004-0.005**
 
 *Radar: pay for AI-qualified prospects, not raw data*
 
