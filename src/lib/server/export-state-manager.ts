@@ -1,13 +1,16 @@
 import type { SearchResult } from '$lib/types/exa';
 
-export type ExportStatus = 'queued' | 'generating_queries' | 'fetching' | 'filtering' | 'generating_csv' | 'ready' | 'error';
+export type ExportStatus = 'queued' | 'generating_queries' | 'fetching' | 'filtering' | 'enriching' | 'generating_csv' | 'ready' | 'error';
 
 export interface ExportStats {
 	totalRawSearched: number;      // Total profiles fetched from Exa
 	totalAfterDedup: number;       // After deduplication
 	totalPassedFilter: number;     // After LLM filtering
+	queriesUsed?: number;          // Number of search queries used
 	searchExhausted: boolean;      // True if no more results available from Exa
 	stopReason: 'target_reached' | 'search_exhausted' | 'diminishing_returns' | 'error';
+	llmCost?: number;              // LLM cost in USD
+	exaEnrichmentCost?: number;    // Exa company enrichment cost in USD
 }
 
 export interface ExportJob {

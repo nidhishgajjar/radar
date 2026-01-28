@@ -2,10 +2,30 @@ import type { RequestHandler } from './$types';
 import { json } from '@sveltejs/kit';
 import { AgenticSearchService } from '$lib/server/agentic-search';
 import { exportStateManager, type ExportStats } from '$lib/server/export-state-manager';
+import { companyEnrichment } from '$lib/server/company-enrichment';
 import { generateCSV } from '$lib/utils/csv';
+import { OpenRouterClient } from '$lib/server/openrouter-client';
 import type { SearchResult, SearchFilters } from '$lib/types/exa';
 
 const agenticSearch = new AgenticSearchService();
+
+/**
+ * Extract company name from LinkedIn title
+ */
+function extractCompanyFromTitle(title: string): string | null {
+	// Try to extract company from "Name at Company" or "Name | Role at Company"
+	const atMatch = title.match(/(?:at|@)\s+([^|]+?)(?:\s*[|]|$)/i);
+	if (atMatch) return atMatch[1].trim();
+
+	// Try "Role, Company" pattern
+	const parts = title.split(',');
+	if (parts.length >= 2) {
+		const lastPart = parts[parts.length - 1].trim();
+		if (lastPart.length > 2 && lastPart.length < 50) return lastPart;
+	}
+
+	return null;
+}
 
 export const POST: RequestHandler = async ({ request }) => {
 	try {
@@ -50,6 +70,9 @@ async function processExport(
 	filters?: SearchFilters
 ) {
 	try {
+		// Reset LLM cost tracking for this export
+		OpenRouterClient.resetSessionCost();
+
 		let queriesToUse = searchQueries || [];
 
 		// If no queries provided, generate them first (direct export mode)
@@ -97,26 +120,26 @@ async function processExport(
 
 		console.log(`[Export ${jobId}] Analyzing ${allResults.length} candidates with LLM...`);
 
-		const filterResult = await agenticSearch.filterResults(allResults, query, filters);
+		// Use forceFilter=true to always run LLM filtering for export (get fit scores and key highlights)
+		// This returns ALL results with their filterMetadata, not just qualified ones
+		const filterResult = await agenticSearch.filterResults(allResults, query, filters, undefined, true);
 
-		// Separate qualified (passed filter) and other candidates
-		const qualifiedResults = filterResult.results;
-		const qualifiedUrls = new Set(qualifiedResults.map(r => r.url));
+		// All results now have filterMetadata. Mark qualified based on fit score threshold
+		const allWithStatus = filterResult.results.map(result => {
+			const fitScore = result.filterMetadata?.fitScore || 0;
+			const isQualified = fitScore >= 40;
 
-		// Mark all results with their filter status
-		const allWithStatus = allResults.map(result => ({
-			...result,
-			filterMetadata: {
-				...result.filterMetadata,
-				qualified: qualifiedUrls.has(result.url),
-				fitScore: qualifiedUrls.has(result.url)
-					? (qualifiedResults.find(r => r.url === result.url)?.filterMetadata?.fitScore || 0)
-					: 0,
-				recentlyLeft: qualifiedUrls.has(result.url)
-					? (qualifiedResults.find(r => r.url === result.url)?.filterMetadata?.recentlyLeft || false)
-					: false
-			}
-		}));
+			return {
+				...result,
+				filterMetadata: {
+					...result.filterMetadata,
+					qualified: isQualified
+				}
+			};
+		});
+
+		// Get qualified results for counting and company enrichment
+		const qualifiedResults = allWithStatus.filter(r => r.filterMetadata?.qualified);
 
 		// Sort: qualified first (by recentlyLeft, then fitScore), then others
 		const sortedResults = allWithStatus.sort((a, b) => {
@@ -136,15 +159,53 @@ async function processExport(
 			return scoreB - scoreA;
 		});
 
-		exportStateManager.updateProgress(jobId, 90, sortedResults.length);
+		exportStateManager.updateProgress(jobId, 85, sortedResults.length);
 
-		// Build final stats
+		// Run company enrichment for qualified candidates
+		console.log(`[Export ${jobId}] Enriching companies for ${qualifiedResults.length} qualified candidates...`);
+		exportStateManager.updateStatus(jobId, 'enriching', 87);
+
+		// Extract unique company names from qualified results
+		const companyNames = qualifiedResults
+			.map(r => r.filterMetadata?.currentEmployer || extractCompanyFromTitle(r.title))
+			.filter((c): c is string => !!c && c.length > 2);
+
+		const uniqueCompanies = [...new Set(companyNames)];
+		let exaEnrichmentCost = 0;
+
+		if (uniqueCompanies.length > 0) {
+			const enrichmentResult = await companyEnrichment.enrichCompanies(uniqueCompanies, { includeNews: false });
+			exaEnrichmentCost = enrichmentResult.stats.estimatedCost;
+			console.log(`[Export ${jobId}] Enriched ${enrichmentResult.stats.companiesFound}/${enrichmentResult.stats.companiesSearched} companies ($${exaEnrichmentCost.toFixed(3)})`);
+
+			// Add company data to results
+			for (const result of sortedResults) {
+				const company = result.filterMetadata?.currentEmployer || extractCompanyFromTitle(result.title);
+				if (company) {
+					const normalizedKey = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+					const companyData = enrichmentResult.results.get(normalizedKey);
+					if (companyData) {
+						result.companyData = companyData;
+					}
+				}
+			}
+		}
+
+		exportStateManager.updateProgress(jobId, 92, sortedResults.length);
+
+		// Get LLM costs
+		const llmCost = OpenRouterClient.getSessionCost();
+
+		// Build final stats with costs
 		const finalStats: ExportStats = {
 			totalRawSearched: searchStats.totalRawSearched,
 			totalAfterDedup: searchStats.totalAfterDedup,
 			totalPassedFilter: qualifiedResults.length,
+			queriesUsed: searchStats.queriesUsed,
 			searchExhausted: searchStats.searchExhausted,
-			stopReason: searchStats.stopReason
+			stopReason: searchStats.stopReason,
+			llmCost: llmCost.cost,
+			exaEnrichmentCost
 		};
 
 		// Generate CSV with all candidates
@@ -153,7 +214,10 @@ async function processExport(
 
 		exportStateManager.markReady(jobId, csvContent, sortedResults.length, finalStats);
 
-		console.log(`[Export ${jobId}] Ready: ${sortedResults.length} total (${qualifiedResults.length} qualified) | Searched ${finalStats.totalRawSearched} raw → ${finalStats.totalAfterDedup} unique | ${finalStats.searchExhausted ? 'EXHAUSTED' : 'More available'}`);
+		// Log final summary with costs
+		const totalCost = llmCost.cost + exaEnrichmentCost;
+		console.log(`[Export ${jobId}] Ready: ${sortedResults.length} total (${qualifiedResults.length} qualified) | ${finalStats.queriesUsed} queries | ${finalStats.totalRawSearched} raw → ${finalStats.totalAfterDedup} unique | ${finalStats.stopReason}`);
+		console.log(`[Export ${jobId}] Costs: LLM $${llmCost.cost.toFixed(4)} (${llmCost.requests} calls) + Exa $${exaEnrichmentCost.toFixed(3)} = Total $${totalCost.toFixed(3)}`);
 	} catch (error) {
 		console.error(`[Export ${jobId}] Processing error:`, error);
 		throw error;

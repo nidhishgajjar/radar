@@ -11,11 +11,20 @@ import {
 } from '$env/static/private';
 import { withRetry } from '$lib/utils/retry';
 
+// Fallback cost calculation for Grok Fast: $0.20/1M input, $0.50/1M output
+const COST_PER_INPUT_TOKEN = 0.20 / 1_000_000;
+const COST_PER_OUTPUT_TOKEN = 0.50 / 1_000_000;
+
 export class OpenRouterClient {
 	private apiKey: string;
 	private model: string;
 	private timeout: number;
 	private baseUrl = 'https://openrouter.ai/api/v1';
+
+	// Session cost tracking
+	private static sessionCost = 0;
+	private static sessionTokens = { input: 0, output: 0 };
+	private static requestCount = 0;
 
 	constructor() {
 		if (!OPENROUTER_API_KEY) {
@@ -24,6 +33,50 @@ export class OpenRouterClient {
 		this.apiKey = OPENROUTER_API_KEY;
 		this.model = OPENROUTER_MODEL || 'x-ai/grok-4.1-fast';
 		this.timeout = parseInt(OPENROUTER_TIMEOUT_MS || '5000');
+	}
+
+	/**
+	 * Track token usage and cost from OpenRouter response
+	 */
+	private trackUsage(usage?: { prompt_tokens: number; completion_tokens: number; cost?: number }) {
+		if (!usage) return;
+
+		// Use actual cost from OpenRouter if available, otherwise calculate
+		const totalCost = usage.cost ??
+			(usage.prompt_tokens * COST_PER_INPUT_TOKEN + usage.completion_tokens * COST_PER_OUTPUT_TOKEN);
+
+		OpenRouterClient.sessionTokens.input += usage.prompt_tokens;
+		OpenRouterClient.sessionTokens.output += usage.completion_tokens;
+		OpenRouterClient.sessionCost += totalCost;
+		OpenRouterClient.requestCount++;
+	}
+
+	/**
+	 * Get current session cost summary
+	 */
+	static getSessionCost(): { cost: number; tokens: { input: number; output: number }; requests: number } {
+		return {
+			cost: OpenRouterClient.sessionCost,
+			tokens: { ...OpenRouterClient.sessionTokens },
+			requests: OpenRouterClient.requestCount
+		};
+	}
+
+	/**
+	 * Reset session cost tracking
+	 */
+	static resetSessionCost(): void {
+		OpenRouterClient.sessionCost = 0;
+		OpenRouterClient.sessionTokens = { input: 0, output: 0 };
+		OpenRouterClient.requestCount = 0;
+	}
+
+	/**
+	 * Log session cost summary
+	 */
+	static logSessionCost(label?: string): void {
+		const { cost, tokens, requests } = OpenRouterClient.getSessionCost();
+		console.log(`[LLM Cost${label ? ` - ${label}` : ''}] ${requests} requests, ${tokens.input + tokens.output} tokens, $${cost.toFixed(4)}`);
 	}
 
 	/**
@@ -55,7 +108,12 @@ export class OpenRouterClient {
 						throw await this.handleErrorResponse(response);
 					}
 
-					return await response.json() as OpenRouterResponse;
+					const data = await response.json() as OpenRouterResponse;
+
+					// Track usage and cost from response
+					this.trackUsage(data.usage);
+
+					return data;
 				} catch (error) {
 					clearTimeout(timeoutId);
 
@@ -151,7 +209,9 @@ Output: "Marketing Director Canada SaaS software B2B experience"`;
 		jobDescription: string,
 		excludeEmployer?: string,
 		geographicFocus?: string[],
-		flexibleLocation: boolean = false
+		flexibleLocation: boolean = false,
+		numQueries: number = 4,
+		previousQueries?: string[]
 	): Promise<string[]> {
 		// Extract location from job description for strict filtering
 		const locationMatch = jobDescription.match(/\b(Toronto|Vancouver|Calgary|Edmonton|Ottawa|Montreal|Winnipeg|Halifax|Victoria|BC|Ontario|Alberta|Quebec|Canada|USA|New York|San Francisco|Seattle|Boston|Chicago|Los Angeles|Austin|Denver|Miami|Atlanta)\b/gi);
@@ -173,6 +233,10 @@ Output: "Marketing Director Canada SaaS software B2B experience"`;
 			? `CRITICAL: Exclude anyone currently at "${excludeEmployer}"`
 			: '';
 
+		const previousContext = previousQueries?.length
+			? `\nALREADY USED (generate DIFFERENT queries, not these):\n${previousQueries.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\nGenerate NEW angles that haven't been tried.`
+			: '';
+
 		const systemPrompt = `You are an executive recruiter generating LinkedIn search queries to find EXTERNAL candidates.
 
 Job: ${jobDescription}
@@ -180,17 +244,19 @@ Job: ${jobDescription}
 ${geoContext}
 ${locationRule}
 ${excludeContext}
+${previousContext}
 
-Generate 4 different search queries that will find RECRUITABLE external candidates:
+Generate ${numQueries} ${previousQueries?.length ? 'NEW and DIFFERENT' : 'different'} search queries that will find RECRUITABLE external candidates:
 
 RULES:
 1. Focus on similar roles at OTHER organizations${excludeEmployer ? ` (not ${excludeEmployer})` : ''}
 2. ${detectedLocation && !flexibleLocation ? `MANDATORY: Include "${detectedLocation}" in EVERY query` : 'Include geographic locations from the job description'}
 3. Use the EXACT job title from the description (e.g., "Executive Director" not just "Director")
 4. Include industry/domain keywords (healthcare, technology, finance, etc.)
-5. Each query should target different candidate pools
+5. Each query should target different candidate pools - vary titles, industries, related roles
+6. Think creatively: include adjacent roles, related industries, competitor companies${previousQueries?.length ? '\n7. MUST be completely different from already-used queries - try synonyms, related titles, adjacent industries' : ''}
 
-Return ONLY a JSON array of 4 search query strings.`;
+Return ONLY a JSON array of ${numQueries} search query strings.`;
 
 		const request: OpenRouterRequest = {
 			model: this.model, // Use Grok Fast
@@ -198,8 +264,8 @@ Return ONLY a JSON array of 4 search query strings.`;
 				{ role: 'system', content: systemPrompt },
 				{ role: 'user', content: jobDescription }
 			],
-			temperature: 0.3,
-			max_tokens: 250
+			temperature: 0.4, // Slightly higher for more variety in queries
+			max_tokens: numQueries * 80 // ~80 tokens per query
 		};
 
 		try {
@@ -248,6 +314,7 @@ Return ONLY a JSON array of 4 search query strings.`;
 		fitScore: number;
 		reasoning: string;
 		recentlyLeft?: boolean;
+		keyHighlights?: string[];
 	}> {
 		// Use Grok Fast for filtering
 		const prompt = `Analyze LinkedIn profile for job fit.
@@ -262,9 +329,10 @@ Analyze:
 2. isExternal: true if NOT currently at the hiring company
 3. fitScore: 0-100 based on skills/experience match
 4. recentlyLeft: true if they show "Former" or left a relevant role in last 6 months (look for dates like "2024", "Present" endings)
-5. reasoning: Brief explanation
+5. keyHighlights: Array of 2-3 brief highlights that make this person a good fit (e.g., "10+ years experience", "Led team of 15", "AWS certified")
+6. reasoning: Brief explanation
 
-Return JSON only: {"currentEmployer":"name or null","isExternal":true/false,"fitScore":0-100,"recentlyLeft":true/false,"reasoning":"brief"}`;
+Return JSON only: {"currentEmployer":"name or null","isExternal":true/false,"fitScore":0-100,"recentlyLeft":true/false,"keyHighlights":["highlight1","highlight2"],"reasoning":"brief"}`;
 
 		const request: OpenRouterRequest = {
 			model: this.model, // Grok Fast
@@ -298,7 +366,8 @@ Return JSON only: {"currentEmployer":"name or null","isExternal":true/false,"fit
 					isExternal: true,
 					fitScore: 40,
 					reasoning: 'Unable to parse LLM response',
-					recentlyLeft: false
+					recentlyLeft: false,
+					keyHighlights: []
 				};
 			}
 		} catch (error) {
@@ -309,7 +378,8 @@ Return JSON only: {"currentEmployer":"name or null","isExternal":true/false,"fit
 				isExternal: true,
 				fitScore: 40,
 				reasoning: 'Error during filtering',
-				recentlyLeft: false
+				recentlyLeft: false,
+				keyHighlights: []
 			};
 		}
 	}

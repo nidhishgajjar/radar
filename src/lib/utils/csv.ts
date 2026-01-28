@@ -104,17 +104,38 @@ function escapeCSVValue(value: string): string {
 
 /**
  * Generate CSV content from search results
- * Columns: Qualified, Name, Title, Company, LinkedIn URL, Fit Score, Recently Left, Key Highlights
+ * Columns: Qualified, Name, Title, Company, LinkedIn URL, Fit Score, Recently Left, Key Highlights, Headcount, Revenue, Funding, Industry
  */
 export function generateCSV(results: SearchResult[]): string {
-	const headers = ['Qualified', 'Name', 'Title', 'Company', 'LinkedIn URL', 'Fit Score', 'Recently Left', 'Key Highlights'];
+	const headers = [
+		'Qualified',
+		'Name',
+		'Title',
+		'Company',
+		'LinkedIn URL',
+		'Fit Score',
+		'Recently Left',
+		'Key Highlights',
+		'Headcount',
+		'Revenue',
+		'Funding',
+		'Industry'
+	];
 
 	const rows = results.map((result) => {
 		const { name, title, company } = parsePersonDetails(result.title);
 		const qualified = result.filterMetadata?.qualified ? 'Yes' : 'No';
 		const fitScore = result.filterMetadata?.fitScore ?? result.score ?? '';
 		const recentlyLeft = result.filterMetadata?.recentlyLeft ? 'Yes' : '';
-		const highlights = result.highlights?.slice(0, 3).join('; ') ?? '';
+
+		// Use AI-generated key highlights from filterMetadata, not raw Exa highlights
+		const keyHighlights = result.filterMetadata?.keyHighlights?.slice(0, 3).join('; ') ?? '';
+
+		// Company enrichment data
+		const headcount = result.companyData?.headcount ?? '';
+		const revenue = result.companyData?.revenue ?? '';
+		const funding = result.companyData?.funding ?? '';
+		const industry = result.companyData?.industry ?? '';
 
 		return [
 			escapeCSVValue(qualified),
@@ -124,7 +145,11 @@ export function generateCSV(results: SearchResult[]): string {
 			escapeCSVValue(result.url),
 			escapeCSVValue(String(fitScore)),
 			escapeCSVValue(recentlyLeft),
-			escapeCSVValue(highlights)
+			escapeCSVValue(keyHighlights),
+			escapeCSVValue(String(headcount)),
+			escapeCSVValue(revenue),
+			escapeCSVValue(funding),
+			escapeCSVValue(industry)
 		].join(',');
 	});
 

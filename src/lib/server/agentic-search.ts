@@ -203,13 +203,15 @@ export class AgenticSearchService {
 	 * Use this for instant feedback while filtering runs in background.
 	 *
 	 * @param numResultsPerQuery - Results per query (default: 25 for quick preview, 100 for exhaustive)
+	 * @param numQueries - Number of search queries to generate (default: 4 for preview, 10 for export)
 	 */
 	async searchRaw(
 		userQuery: string,
 		page: number = 1,
 		providedQueries?: string[],
 		filters?: SearchFilters,
-		numResultsPerQuery: number = 25
+		numResultsPerQuery: number = 25,
+		numQueries: number = 4
 	) {
 		const searchQueries: string[] = providedQueries || [];
 		let queriesGenerated = false;
@@ -294,14 +296,19 @@ export class AgenticSearchService {
 	/**
 	 * Apply LLM filtering to results.
 	 * Called separately after searchRaw() for background processing.
+	 *
+	 * @param forceFilter - If true, always run LLM filtering even without externalOnly/excludeCurrentEmployer filters.
+	 *                      Use this for export mode to get fit scores and key highlights.
 	 */
 	async filterResults(
 		results: SearchResult[],
 		userQuery: string,
 		filters?: SearchFilters,
-		searchId?: string
+		searchId?: string,
+		forceFilter: boolean = false
 	) {
-		if (!filters?.externalOnly && !filters?.excludeCurrentEmployer) {
+		// Skip filtering only if no filters AND not forced
+		if (!forceFilter && !filters?.externalOnly && !filters?.excludeCurrentEmployer) {
 			// No filtering needed
 			return {
 				results,
@@ -359,7 +366,8 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 					isExternal: true,
 					fitScore: 30,
 					reasoning: 'Filtering error',
-					currentEmployer: undefined
+					currentEmployer: undefined,
+					keyHighlights: []
 				};
 				processed++;
 				filteredResults.push(result);
@@ -370,7 +378,53 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 		// Wait for all to complete
 		await Promise.all(filterPromises);
 
-		// Filter out internal candidates and low scores
+		// For forceFilter mode (export), return ALL results with their filterMetadata
+		// The caller will decide what to do with qualified vs unqualified
+		if (forceFilter) {
+			// Still filter by externalOnly if specified, but keep all fit scores
+			let resultsToReturn = filteredResults;
+
+			if (filters?.externalOnly) {
+				resultsToReturn = filteredResults.filter(result => {
+					if (!result.filterMetadata) return false;
+					if (!result.filterMetadata.isExternal) {
+						// Exception: include if they recently left
+						if (filters?.includeRecentDepartures && result.filterMetadata.recentlyLeft) {
+							return true;
+						}
+						return false;
+					}
+					return true;
+				});
+			}
+
+			// Sort: recentlyLeft first, then by fit score
+			resultsToReturn.sort((a, b) => {
+				const aRecent = a.filterMetadata?.recentlyLeft ? 1 : 0;
+				const bRecent = b.filterMetadata?.recentlyLeft ? 1 : 0;
+				if (aRecent !== bRecent) return bRecent - aRecent;
+				const scoreA = a.filterMetadata?.fitScore || 0;
+				const scoreB = b.filterMetadata?.fitScore || 0;
+				return scoreB - scoreA;
+			});
+
+			// Mark qualified based on fit score threshold
+			const qualifiedCount = resultsToReturn.filter(r => (r.filterMetadata?.fitScore || 0) >= 40).length;
+
+			console.log(`Analyzed ${resultsToReturn.length} candidates, ${qualifiedCount} qualified (fitScore >= 40)`);
+
+			return {
+				results: resultsToReturn,
+				metadata: {
+					total_results_before_filter: results.length,
+					total_results_after_filter: resultsToReturn.length,
+					total_qualified: qualifiedCount,
+					filtering_applied: true
+				}
+			};
+		}
+
+		// Normal mode: Filter out internal candidates and low scores
 		const externalResults = filteredResults.filter(result => {
 			if (!result.filterMetadata) return false;
 
@@ -416,9 +470,9 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 	}
 
 	/**
-	 * Bulk search for export - exhaustively fetches results using cursor pagination.
-	 * Keeps going until Exa is exhausted or we have enough filtered results.
-	 * Returns detailed stats about the search process.
+	 * Bulk search for export - exhaustively fetches results using adaptive query generation.
+	 * Exa has NO pagination (max 100 per query), so we generate varied queries to find more.
+	 * Keeps generating new queries until they stop producing new unique results.
 	 */
 	async searchBulk(
 		userQuery: string,
@@ -432,93 +486,143 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 			totalRawSearched: number;
 			totalAfterDedup: number;
 			rounds: number;
+			queriesUsed: number;
 			searchExhausted: boolean;
 			stopReason: 'target_reached' | 'search_exhausted' | 'diminishing_returns';
 		};
 	}> {
 		const seenUrls = new Set<string>();
 		const allResults: SearchResult[] = [];
-		const searchQueries = providedQueries;
+		const usedQueries: string[] = [];
+		let pendingQueries: string[] = [...providedQueries];
 
-		// Track cursors per query for pagination
-		const cursors: (string | undefined)[] = searchQueries.map(() => undefined);
-		let hasMore = true;
 		let round = 0;
 		let totalRawSearched = 0;
-		let consecutiveLowYieldRounds = 0;
 		let stopReason: 'target_reached' | 'search_exhausted' | 'diminishing_returns' = 'search_exhausted';
 
-		// Keep fetching until exhausted - no arbitrary round limit
-		while (hasMore) {
-			round++;
-			console.log(`[Bulk Search] Round ${round}: Fetching with ${searchQueries.length} queries...`);
+		console.log(`[Bulk Search] Starting with ${pendingQueries.length} initial queries`);
 
-			// Run all queries in parallel with their respective cursors
-			const searchPromises = searchQueries.map((query, i) =>
-				this.exa.searchPeople(query, { numResults: 100, cursor: cursors[i] }).then(r => {
-					// Update cursor for next round
-					cursors[i] = r.nextCursor;
-					return { results: r.results, queryIndex: i, hasMore: !!r.nextCursor };
+		// Keep going until we run out of useful queries
+		while (pendingQueries.length > 0) {
+			round++;
+
+			// Run all pending queries in parallel (100 results each - Exa max)
+			console.log(`[Bulk Search] Round ${round}: Running ${pendingQueries.length} queries...`);
+
+			const searchPromises = pendingQueries.map(query =>
+				this.exa.searchPeople(query, { numResults: 100 }).then(r => {
+					return { results: r.results, query };
 				}).catch(err => {
-					console.error(`Query ${i + 1} failed:`, err);
-					return { results: [], queryIndex: i, hasMore: false };
+					console.error(`Query failed: "${query.substring(0, 50)}..."`, err.message);
+					return { results: [], query };
 				})
 			);
 
 			const responses = await Promise.all(searchPromises);
 
-			// Count raw results before dedup
+			// Mark queries as used
+			usedQueries.push(...pendingQueries);
+			pendingQueries = [];
+
+			// Count raw results and deduplicate
 			const rawThisRound = responses.reduce((sum, r) => sum + r.results.length, 0);
 			totalRawSearched += rawThisRound;
 
-			// Check if any query has more results
-			hasMore = responses.some(r => r.hasMore);
-
-			// Deduplicate and add results
-			let newResults = 0;
+			let newThisRound = 0;
 			for (const response of responses) {
 				for (const result of response.results) {
 					if (!seenUrls.has(result.url)) {
 						seenUrls.add(result.url);
 						allResults.push(result);
-						newResults++;
+						newThisRound++;
 					}
 				}
 			}
 
-			console.log(`[Bulk Search] Round ${round}: Raw ${rawThisRound}, New unique ${newResults}, Total unique ${allResults.length}, HasMore: ${hasMore}`);
+			const yieldRate = rawThisRound > 0 ? (newThisRound / rawThisRound * 100).toFixed(1) : 0;
+			console.log(`[Bulk Search] Round ${round}: Raw ${rawThisRound}, New ${newThisRound} (${yieldRate}% yield), Total ${allResults.length}`);
 
 			if (onProgress) {
 				onProgress({ totalRaw: totalRawSearched, unique: allResults.length, round });
 			}
 
-			// Check if we have enough (with buffer for filtering losses)
-			if (allResults.length >= targetCount * 1.5) {
+			// Check if we have enough
+			if (allResults.length >= targetCount) {
 				stopReason = 'target_reached';
-				console.log(`[Bulk Search] Target reached with buffer (${allResults.length} >= ${targetCount * 1.5})`);
+				console.log(`[Bulk Search] Target reached: ${allResults.length} >= ${targetCount}`);
 				break;
 			}
 
-			// Track diminishing returns - stop if 3 consecutive rounds with <5% new results
-			if (rawThisRound > 0 && newResults / rawThisRound < 0.05) {
-				consecutiveLowYieldRounds++;
-				if (consecutiveLowYieldRounds >= 3) {
-					stopReason = 'diminishing_returns';
-					console.log(`[Bulk Search] Stopping - 3 consecutive low yield rounds`);
+			// Decide whether to generate more queries based on yield
+			// If this round had good yield (>15%), generate more queries
+			// If yield was low (<10%), we're likely exhausting the search space
+			const shouldGenerateMore = rawThisRound === 0 || (newThisRound / Math.max(rawThisRound, 1)) > 0.10;
+
+			if (shouldGenerateMore) {
+				console.log(`[Bulk Search] Generating more queries (previous yield: ${yieldRate}%)...`);
+
+				const newQueries = await this.openRouter.generateRecruitmentQueries(
+					userQuery,
+					filters?.excludeCurrentEmployer,
+					filters?.geographicFocus,
+					filters?.flexibleLocation ?? false,
+					6, // Generate 6 new queries each round
+					usedQueries // Pass all used queries as context to avoid duplicates
+				);
+
+				// Filter out queries we've already used (exact or very similar)
+				for (const q of newQueries) {
+					const isDuplicate = usedQueries.some(used =>
+						used.toLowerCase() === q.toLowerCase() ||
+						this.querySimilarity(used, q) > 0.8
+					);
+					if (!isDuplicate) {
+						pendingQueries.push(q);
+					}
+				}
+
+				console.log(`[Bulk Search] Generated ${newQueries.length} queries, ${pendingQueries.length} are new`);
+
+				if (pendingQueries.length === 0) {
+					stopReason = 'search_exhausted';
+					console.log(`[Bulk Search] Can't generate new unique queries - search space exhausted`);
 					break;
 				}
 			} else {
-				consecutiveLowYieldRounds = 0;
-			}
+				// Low yield - check if we should stop or try one more batch
+				console.log(`[Bulk Search] Low yield (${yieldRate}%) - trying one more query batch...`);
 
-			// If no more results from any query
-			if (!hasMore) {
-				stopReason = 'search_exhausted';
-				console.log(`[Bulk Search] Search exhausted - no more results from Exa`);
+				const lastChanceQueries = await this.openRouter.generateRecruitmentQueries(
+					userQuery,
+					filters?.excludeCurrentEmployer,
+					filters?.geographicFocus,
+					filters?.flexibleLocation ?? false,
+					4,
+					usedQueries
+				);
+
+				for (const q of lastChanceQueries) {
+					const isDuplicate = usedQueries.some(used =>
+						used.toLowerCase() === q.toLowerCase() ||
+						this.querySimilarity(used, q) > 0.8
+					);
+					if (!isDuplicate) {
+						pendingQueries.push(q);
+					}
+				}
+
+				if (pendingQueries.length === 0) {
+					stopReason = 'diminishing_returns';
+					console.log(`[Bulk Search] Diminishing returns - stopping`);
+					break;
+				}
+
+				// Run this last batch, then check yield again
+				// If still low, we'll stop in the next iteration
 			}
 		}
 
-		console.log(`[Bulk Search] Complete: ${allResults.length} unique from ${totalRawSearched} raw after ${round} rounds. Reason: ${stopReason}`);
+		console.log(`[Bulk Search] Complete: ${allResults.length} unique from ${totalRawSearched} raw, ${usedQueries.length} queries, ${round} rounds. Reason: ${stopReason}`);
 
 		return {
 			results: allResults,
@@ -526,10 +630,22 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 				totalRawSearched,
 				totalAfterDedup: allResults.length,
 				rounds: round,
-				searchExhausted: !hasMore,
+				queriesUsed: usedQueries.length,
+				searchExhausted: stopReason === 'search_exhausted',
 				stopReason
 			}
 		};
+	}
+
+	/**
+	 * Simple query similarity check (Jaccard similarity on words)
+	 */
+	private querySimilarity(a: string, b: string): number {
+		const wordsA = new Set(a.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+		const wordsB = new Set(b.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+		const intersection = [...wordsA].filter(w => wordsB.has(w)).length;
+		const union = new Set([...wordsA, ...wordsB]).size;
+		return union > 0 ? intersection / union : 0;
 	}
 
 	/**
@@ -620,7 +736,8 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 						isExternal: true,
 						fitScore: 30,
 						reasoning: 'Filtering error',
-						currentEmployer: undefined
+						currentEmployer: undefined,
+						keyHighlights: []
 					};
 					return result;
 				}
