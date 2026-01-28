@@ -53,6 +53,33 @@
 				{#if role}
 					<p class="role">{role}</p>
 				{/if}
+				{#if person.companyData && (person.companyData.headcount || person.companyData.revenue)}
+					<div class="company-stats">
+						{#if person.companyData.headcount}
+							<span class="stat">
+								<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+									<circle cx="9" cy="7" r="4"></circle>
+									<path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+									<path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+								</svg>
+								{person.companyData.headcount.toLocaleString()}
+							</span>
+						{/if}
+						{#if person.companyData.revenue}
+							<span class="stat">
+								<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<line x1="12" y1="1" x2="12" y2="23"></line>
+									<path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+								</svg>
+								{person.companyData.revenue}
+							</span>
+						{/if}
+						{#if person.companyData.industry}
+							<span class="stat industry">{person.companyData.industry}</span>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		</div>
 	</button>
@@ -176,6 +203,34 @@
 		line-height: 1.47059;
 		letter-spacing: -0.022em;
 		font-weight: 400;
+	}
+
+	.company-stats {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 8px;
+	}
+
+	.stat {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 3px 8px;
+		background: #f5f5f7;
+		color: #1d1d1f;
+		font-size: 12px;
+		font-weight: 500;
+		border-radius: 4px;
+	}
+
+	.stat svg {
+		color: #86868b;
+	}
+
+	.stat.industry {
+		background: rgba(0, 122, 255, 0.08);
+		color: #007aff;
 	}
 
 	.linkedin-link {

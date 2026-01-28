@@ -146,7 +146,7 @@ Radar uses AI to analyze every prospect and provide:
 - $0.50 per 1M output tokens
 - ~$0.0005 per candidate filtered
 
-### Example Export: "Senior React Developer Toronto"
+### Example 1: "Senior React Developer Toronto"
 
 | Component | Units | Rate | Cost |
 |-----------|-------|------|------|
@@ -155,11 +155,26 @@ Radar uses AI to analyze every prospect and provide:
 | **AI Filtering** | 804 candidates | ~$0.0005/each | $0.41 |
 | **Total** | | | **$2.24** |
 
-**Result:** 804 unique → **499 qualified** prospects
+**Result:** 804 unique → **499 qualified** prospects | **Cost per qualified: ~$0.004**
 
-**Cost per qualified prospect: ~$0.004-0.005**
+### Example 2: "Canadian DTC/Ecommerce Founders, 50+ employees, $10M+ revenue"
 
-*Radar: pay for AI-qualified prospects, not raw data*
+| Component | Units | Rate | Cost |
+|-----------|-------|------|------|
+| **Candidate Search** | 22 queries × 100 results | $0.025/query | $0.55 |
+| **Company Enrichment** | 598 companies × 5 results | $0.005/search | $2.98 |
+| **AI Filtering** | 1166 candidates | ~$0.0007/each | $0.78 |
+| **Total** | | | **$4.31** |
+
+**Result:** 2200 raw → 1166 unique → **678 qualified** prospects
+
+- 44% have verified revenue data
+- 18% have verified headcount data
+- 42 candidates meet **both** 50+ employees AND $10M+ revenue with verified data
+
+**Cost per qualified prospect: ~$0.006**
+
+*Company data (headcount, revenue) available to LLM during filtering for criteria-based qualification*
 
 ---
 

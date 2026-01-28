@@ -27,7 +27,9 @@
 	let hasMore = $state(false);
 	let queries: string[] = $state([]);
 	let flexibleLocation = $state(false);
+	let companyEnrichment = $state(true);
 	let searchMode = $state<'search' | 'export'>('search');
+	let enrichmentInProgress = $state(false);
 
 	// Two-phase loading state
 	let searchId = $state<string | null>(null);
@@ -38,6 +40,8 @@
 	let showExportModal = $state(false);
 	let activeExportJobId = $state<string | null>(null);
 	let exportProgress = $state(0);
+	let exportStatus = $state<string>('');
+	let isExportMode = $state(false);
 	let toast = $state<{ message: string; type: ToastType; downloadUrl?: string; stats?: { totalRawSearched: number; totalAfterDedup: number; totalPassedFilter: number; searchExhausted: boolean; stopReason: string } } | null>(null);
 
 	// Request notification permission on mount
@@ -93,6 +97,8 @@
 
 				if (!response.ok) {
 					clearInterval(pollInterval);
+					isExportMode = false;
+					exportStatus = '';
 					toast = {
 						message: data.error || 'Export failed',
 						type: 'error'
@@ -104,6 +110,21 @@
 
 				exportProgress = data.progress || 0;
 
+				// Update status text based on export phase
+				if (data.status === 'generating_queries') {
+					exportStatus = 'Generating search queries...';
+				} else if (data.status === 'fetching') {
+					exportStatus = `Searching for candidates... ${data.progress}%`;
+				} else if (data.status === 'filtering') {
+					exportStatus = `AI filtering candidates... ${data.progress}%`;
+				} else if (data.status === 'enriching') {
+					exportStatus = `Enriching company data... ${data.progress}%`;
+				} else if (data.status === 'generating_csv') {
+					exportStatus = 'Generating CSV file...';
+				} else if (data.status === 'queued') {
+					exportStatus = 'Starting export...';
+				}
+
 				// Update progress toast
 				if (data.status !== 'ready' && data.status !== 'error') {
 					toast = {
@@ -114,6 +135,8 @@
 
 				if (data.status === 'ready') {
 					clearInterval(pollInterval);
+					isExportMode = false;
+					exportStatus = '';
 
 					// Add to history
 					const filename = generateFilename(query, data.resultCount);
@@ -142,6 +165,8 @@
 					}
 				} else if (data.status === 'error') {
 					clearInterval(pollInterval);
+					isExportMode = false;
+					exportStatus = '';
 					toast = {
 						message: data.error || 'Export failed',
 						type: 'error'
@@ -151,6 +176,7 @@
 				}
 			} catch (err) {
 				console.error('Export polling error:', err);
+				// Don't reset isExportMode on network errors - keep retrying
 			}
 		}, 2000);
 	}
@@ -172,6 +198,7 @@
 		loading = true;
 		error = null;
 		hasSearched = true;
+		isExportMode = false;
 		metadata = null;
 		currentPage = 1;
 		hasMore = false;
@@ -214,6 +241,11 @@
 				filteringInProgress = true;
 				pollFilterProgress(searchId);
 			}
+
+			// Phase 3: Run company enrichment in background if enabled
+			if (companyEnrichment && results.length > 0) {
+				runCompanyEnrichment(results);
+			}
 		} catch (err: any) {
 			error = err.message || 'An error occurred while searching';
 			results = [];
@@ -227,6 +259,9 @@
 		loading = true;
 		error = null;
 		hasSearched = true;
+		isExportMode = true;
+		exportStatus = 'Starting export...';
+		exportProgress = 0;
 
 		try {
 			// Show progress toast
@@ -270,6 +305,8 @@
 
 		} catch (err: any) {
 			error = err.message || 'An error occurred while starting export';
+			isExportMode = false;
+			exportStatus = '';
 			toast = {
 				message: err.message || 'Export failed',
 				type: 'error'
@@ -277,6 +314,80 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	// Run company enrichment in background
+	async function runCompanyEnrichment(searchResults: SearchResult[]) {
+		enrichmentInProgress = true;
+
+		try {
+			// Extract unique company names from results
+			const companies = searchResults
+				.map(r => r.filterMetadata?.currentEmployer || extractCompanyFromTitle(r.title))
+				.filter((c): c is string => !!c && c.length > 2);
+
+			const uniqueCompanies = [...new Set(companies)];
+
+			if (uniqueCompanies.length === 0) {
+				enrichmentInProgress = false;
+				return;
+			}
+
+			console.log(`[Enrichment] Starting enrichment for ${uniqueCompanies.length} unique companies...`);
+
+			const response = await fetch('/api/enrich', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ companies: uniqueCompanies })
+			});
+
+			const data = await response.json();
+
+			if (!response.ok) {
+				console.error('[Enrichment] Failed:', data.error);
+				enrichmentInProgress = false;
+				return;
+			}
+
+			console.log(`[Enrichment] Complete: ${data.stats.companiesFound}/${data.stats.companiesSearched} companies, $${data.stats.estimatedCost.toFixed(3)} cost`);
+
+			// Update results with company data
+			const enrichedResults = results.map(r => {
+				const company = r.filterMetadata?.currentEmployer || extractCompanyFromTitle(r.title);
+				if (!company) return r;
+
+				// Normalize company name for lookup
+				const normalizedKey = company.toLowerCase().replace(/[^a-z0-9]/g, '');
+				const companyData = data.results[normalizedKey];
+
+				if (companyData && (companyData.headcount || companyData.revenue)) {
+					return { ...r, companyData };
+				}
+				return r;
+			});
+
+			results = enrichedResults;
+		} catch (err) {
+			console.error('[Enrichment] Error:', err);
+		} finally {
+			enrichmentInProgress = false;
+		}
+	}
+
+	// Helper to extract company from title
+	function extractCompanyFromTitle(title: string): string | null {
+		// Try to extract company from "Name at Company" or "Name | Role at Company"
+		const atMatch = title.match(/(?:at|@)\s+([^|]+?)(?:\s*[|]|$)/i);
+		if (atMatch) return atMatch[1].trim();
+
+		// Try "Role, Company" pattern
+		const parts = title.split(',');
+		if (parts.length >= 2) {
+			const lastPart = parts[parts.length - 1].trim();
+			if (lastPart.length > 2 && lastPart.length < 50) return lastPart;
+		}
+
+		return null;
 	}
 
 	// Poll for filter progress and update results progressively
@@ -451,12 +562,34 @@
 			<p class="subtitle">Talent intelligence for smarter hiring</p>
 		</header>
 
-		<SearchBar bind:value={query} bind:flexibleLocation={flexibleLocation} bind:searchMode={searchMode} onSearch={handleSearch} />
+		<SearchBar bind:value={query} bind:flexibleLocation={flexibleLocation} bind:companyEnrichment={companyEnrichment} bind:searchMode={searchMode} onSearch={handleSearch} />
 
 		{#if loading}
 			<LoadingState />
 		{:else if error}
 			<ErrorMessage message={error} onRetry={handleRetry} />
+		{:else if isExportMode}
+			<div class="export-progress-container">
+				<div class="export-progress-card">
+					<div class="export-icon">
+						<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+							<polyline points="7 10 12 15 17 10"></polyline>
+							<line x1="12" y1="15" x2="12" y2="3"></line>
+						</svg>
+					</div>
+					<h2 class="export-title">Exporting Candidates</h2>
+					<p class="export-query">"{query}"</p>
+					<div class="export-progress-bar-container">
+						<div class="export-progress-bar">
+							<div class="export-progress-fill" style="width: {exportProgress}%"></div>
+						</div>
+						<span class="export-progress-text">{exportProgress}%</span>
+					</div>
+					<p class="export-status">{exportStatus}</p>
+					<p class="export-hint">This may take a few minutes. We're searching exhaustively and filtering with AI.</p>
+				</div>
+			</div>
 		{:else if hasSearched && results.length === 0}
 			<EmptyState {query} />
 		{:else if results.length > 0}
@@ -669,6 +802,95 @@
 
 	.export-button-footer:active {
 		transform: scale(0.98);
+	}
+
+	.export-progress-container {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		min-height: 400px;
+		padding: 40px 20px;
+	}
+
+	.export-progress-card {
+		background: #f5f5f7;
+		border-radius: 20px;
+		padding: 48px;
+		text-align: center;
+		max-width: 480px;
+		width: 100%;
+	}
+
+	.export-icon {
+		color: #0071e3;
+		margin-bottom: 24px;
+		animation: bounce 2s ease-in-out infinite;
+	}
+
+	@keyframes bounce {
+		0%, 100% { transform: translateY(0); }
+		50% { transform: translateY(-8px); }
+	}
+
+	.export-title {
+		font-size: 28px;
+		font-weight: 700;
+		color: #1d1d1f;
+		margin: 0 0 8px 0;
+		letter-spacing: -0.03em;
+	}
+
+	.export-query {
+		font-size: 15px;
+		color: #86868b;
+		margin: 0 0 32px 0;
+		font-style: italic;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.export-progress-bar-container {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin-bottom: 16px;
+	}
+
+	.export-progress-bar {
+		flex: 1;
+		height: 8px;
+		background: #e5e5e7;
+		border-radius: 4px;
+		overflow: hidden;
+	}
+
+	.export-progress-fill {
+		height: 100%;
+		background: linear-gradient(90deg, #0071e3 0%, #34c759 100%);
+		border-radius: 4px;
+		transition: width 0.5s ease;
+	}
+
+	.export-progress-text {
+		font-size: 15px;
+		font-weight: 600;
+		color: #0071e3;
+		min-width: 45px;
+	}
+
+	.export-status {
+		font-size: 17px;
+		font-weight: 500;
+		color: #1d1d1f;
+		margin: 0 0 16px 0;
+	}
+
+	.export-hint {
+		font-size: 14px;
+		color: #86868b;
+		margin: 0;
+		line-height: 1.5;
 	}
 
 	.filtering-indicator {

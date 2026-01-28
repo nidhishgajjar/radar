@@ -96,6 +96,17 @@ const NEWS_DOMAINS = [
 // Cost tracking
 const COST_PER_SEARCH = 0.005; // $5 per 1000 searches (Exa pricing for <25 results)
 
+// Rate limiting - Exa allows 5 requests per second
+const RATE_LIMIT_BATCH_SIZE = 5;
+const RATE_LIMIT_DELAY_MS = 1100; // Slightly over 1 second for safety
+
+/**
+ * Sleep helper for rate limiting
+ */
+function sleep(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export class CompanyEnrichmentService {
 	private exa: Exa;
 
@@ -534,15 +545,32 @@ export class CompanyEnrichmentService {
 		let found = 0;
 		let signalsFound = 0;
 
-		// Process ALL companies in parallel (like LLM filtering)
-		console.log(`[Enrichment] Starting parallel enrichment for ${uniqueCompanies.length} companies...`);
+		// Process in rate-limited batches (Exa allows 5 requests/second)
+		console.log(`[Enrichment] Starting rate-limited enrichment for ${uniqueCompanies.length} companies (${RATE_LIMIT_BATCH_SIZE}/sec)...`);
 
-		const enrichPromises = uniqueCompanies.map(async (name, index) => {
-			const { data, searchCount: searches, cached } = await this.enrichCompany(name, includeNews);
-			return { name, data, searches, cached, index };
-		});
+		const allResults: Array<{ name: string; data: CompanyData | null; searches: number; cached: boolean; index: number }> = [];
 
-		const allResults = await Promise.all(enrichPromises);
+		// Process in batches with rate limiting
+		for (let i = 0; i < uniqueCompanies.length; i += RATE_LIMIT_BATCH_SIZE) {
+			const batch = uniqueCompanies.slice(i, i + RATE_LIMIT_BATCH_SIZE);
+			const batchPromises = batch.map(async (name, batchIndex) => {
+				const { data, searchCount: searches, cached } = await this.enrichCompany(name, includeNews);
+				return { name, data, searches, cached, index: i + batchIndex };
+			});
+
+			const batchResults = await Promise.all(batchPromises);
+			allResults.push(...batchResults);
+
+			// Report progress
+			if (onProgress) {
+				onProgress({ completed: allResults.length, total: uniqueCompanies.length });
+			}
+
+			// Rate limit: wait before next batch (unless this is the last batch)
+			if (i + RATE_LIMIT_BATCH_SIZE < uniqueCompanies.length) {
+				await sleep(RATE_LIMIT_DELAY_MS);
+			}
+		}
 
 		// Process results
 		for (const { name, data, searches, cached } of allResults) {
