@@ -125,6 +125,33 @@ export class CompanyEnrichmentService {
 	}
 
 	/**
+	 * Validate that search result text is about the company we searched for
+	 * Returns match score 0-1 (1 = perfect match)
+	 */
+	private validateCompanyMatch(text: string, companyName: string): number {
+		const textLower = text.toLowerCase();
+
+		// Split company name into significant words (ignore common suffixes)
+		const ignoreWords = ['inc', 'llc', 'ltd', 'corp', 'co', 'company', 'the', 'and'];
+		const searchTerms = companyName
+			.toLowerCase()
+			.split(/[\s&,.-]+/)
+			.filter(term => term.length > 2 && !ignoreWords.includes(term));
+
+		if (searchTerms.length === 0) return 0;
+
+		// Check how many terms appear in the text
+		const matchedTerms = searchTerms.filter(term => textLower.includes(term));
+		const matchScore = matchedTerms.length / searchTerms.length;
+
+		// Also check if the full company name appears
+		const fullNameMatch = textLower.includes(companyName.toLowerCase()) ? 1 : 0;
+
+		// Return higher of the two scores
+		return Math.max(matchScore, fullNameMatch);
+	}
+
+	/**
 	 * Extract company data from text
 	 */
 	private extractCompanyData(text: string, url: string, companyName: string): CompanyData {
@@ -481,9 +508,17 @@ export class CompanyEnrichmentService {
 			let data: CompanyData | null = null;
 
 			// Find best result from data provider sites
+			// IMPORTANT: Validate the result is actually about the company we searched for
 			for (const r of result.results) {
 				const text = r.text || '';
 				if (text.length > 100) {
+					// Validate this result is about the right company (not a similarly-named one)
+					const matchScore = this.validateCompanyMatch(text, companyName);
+					if (matchScore < 0.5) {
+						// Skip - this result is likely about a different company
+						continue;
+					}
+
 					data = this.extractCompanyData(text, r.url, companyName);
 
 					// If we found useful data, stop searching
