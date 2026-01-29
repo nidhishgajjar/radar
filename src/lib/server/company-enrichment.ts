@@ -414,9 +414,9 @@ export class CompanyEnrichmentService {
 		try {
 			const result = await this.exa.search(`"${companyName}" funding OR layoffs OR acquisition OR hiring OR CEO`, {
 				numResults: 5,
-				text: true,
 				type: 'auto',
-				includeDomains: NEWS_DOMAINS
+				includeDomains: NEWS_DOMAINS,
+				contents: { text: true }
 			});
 
 			const allSignals: CompanySignals = {};
@@ -472,9 +472,9 @@ export class CompanyEnrichmentService {
 			// Search data providers
 			const result = await this.exa.search(`"${companyName}" company employees revenue`, {
 				numResults: 5,
-				text: true,
 				type: 'auto',
-				includeDomains: DATA_PROVIDER_DOMAINS
+				includeDomains: DATA_PROVIDER_DOMAINS,
+				contents: { text: true }
 			});
 			searchCount++;
 

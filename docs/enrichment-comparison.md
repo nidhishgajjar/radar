@@ -136,35 +136,28 @@ Radar uses AI to analyze every prospect and provide:
 ### Radar Cost Breakdown
 
 **Exa API Pricing:**
-| Results per query | Cost per 1000 queries |
-|-------------------|----------------------|
-| < 25 results | $5 |
-| 25-100 results | $25 |
+| Component | Cost per 1000 |
+|-----------|---------------|
+| Search (1-25 results) | $5 |
+| Search (26-100 results) | $25 |
+| **Text extraction** | **$1 per 1000 pages** |
+
+**Optimization:** We use 2-step search (search without text → dedup → fetch text for unique only) to save ~24% on text costs.
 
 **LLM Pricing (Grok 4.1 Fast via OpenRouter):**
 - $0.20 per 1M input tokens
 - $0.50 per 1M output tokens
-- ~$0.0005 per candidate filtered
+- ~$0.0007 per candidate filtered
 
-### Example 1: "Senior React Developer Toronto"
-
-| Component | Units | Rate | Cost |
-|-----------|-------|------|------|
-| **Candidate Search** | 11 queries × 100 results | $0.025/query | $0.28 |
-| **Company Enrichment** | 310 companies × 5 results | $0.005/search | $1.55 |
-| **AI Filtering** | 804 candidates | ~$0.0005/each | $0.41 |
-| **Total** | | | **$2.24** |
-
-**Result:** 804 unique → **499 qualified** prospects | **Cost per qualified: ~$0.004**
-
-### Example 2: "Canadian DTC/Ecommerce Founders, 50+ employees, $10M+ revenue"
+### Example: "Canadian DTC/Ecommerce Founders, 50+ employees, $10M+ revenue"
 
 | Component | Units | Rate | Cost |
 |-----------|-------|------|------|
 | **Candidate Search** | 22 queries × 100 results | $0.025/query | $0.55 |
-| **Company Enrichment** | 598 companies × 5 results | $0.005/search | $2.98 |
+| **Text Extraction** | 1166 unique profiles | $0.001/page | $1.17 |
+| **Company Enrichment** | 598 companies × 5 results | $0.01/search | $5.98 |
 | **AI Filtering** | 1166 candidates | ~$0.0007/each | $0.78 |
-| **Total** | | | **$4.31** |
+| **Total** | | | **~$8.48** |
 
 **Result:** 2200 raw → 1166 unique → **678 qualified** prospects
 
@@ -172,7 +165,7 @@ Radar uses AI to analyze every prospect and provide:
 - 18% have verified headcount data
 - 42 candidates meet **both** 50+ employees AND $10M+ revenue with verified data
 
-**Cost per qualified prospect: ~$0.006**
+**Cost per qualified prospect: ~$0.013**
 
 *Company data (headcount, revenue) available to LLM during filtering for criteria-based qualification*
 

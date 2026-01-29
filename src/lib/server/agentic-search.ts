@@ -248,12 +248,12 @@ export class AgenticSearchService {
 			console.log(`Generated ${searchQueries.length} queries in ${Date.now() - queryGenStart}ms:`, searchQueries);
 		}
 
-		// Step 2: Run all queries in parallel
+		// Step 2: Run all queries in parallel WITHOUT text (cheaper: $0.025 vs $0.125 per query)
 		const searchStart = Date.now();
-		console.log(`Searching with ${searchQueries.length} queries (${numResultsPerQuery} results each)...`);
+		console.log(`Searching with ${searchQueries.length} queries (${numResultsPerQuery} results each, no text)...`);
 
 		const searchPromises = searchQueries.map((query, i) =>
-			this.exa.searchPeople(query, { numResults: numResultsPerQuery }).then(r => {
+			this.exa.searchPeople(query, { numResults: numResultsPerQuery, includeText: false }).then(r => {
 				console.log(`Query ${i + 1} completed in ${Date.now() - searchStart}ms with ${r.results.length} results`);
 				return r;
 			})
@@ -275,7 +275,27 @@ export class AgenticSearchService {
 			}
 		}
 
-		console.log(`Found ${uniqueResults.length} unique profiles (raw, no filtering)`);
+		console.log(`Found ${uniqueResults.length} unique profiles (deduped, fetching text...)`);
+
+		// Step 4: Fetch text content ONLY for unique URLs (saves ~24% on text costs)
+		const uniqueUrls = uniqueResults.map(r => r.url);
+		if (uniqueUrls.length > 0) {
+			try {
+				const contentsStart = Date.now();
+				const contents = await this.exa.getContents(uniqueUrls);
+				const textMap = new Map(contents.map(c => [c.url, c.text]));
+
+				// Merge text into results
+				for (const result of uniqueResults) {
+					result.text = textMap.get(result.url) || '';
+				}
+				console.log(`Fetched text for ${contents.length} unique profiles in ${Date.now() - contentsStart}ms`);
+			} catch (error) {
+				console.error('Failed to fetch contents, proceeding without text:', error);
+			}
+		}
+
+		console.log(`Found ${uniqueResults.length} unique profiles with text`);
 
 		// Return immediately with raw results - NO filtering applied
 		return {
@@ -519,7 +539,7 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 			console.log(`[Bulk Search] Round ${round}: Running ${pendingQueries.length} queries...`);
 
 			const searchPromises = pendingQueries.map(query =>
-				this.exa.searchPeople(query, { numResults: 100 }).then(r => {
+				this.exa.searchPeople(query, { numResults: 100, includeText: false }).then(r => {
 					return { results: r.results, query };
 				}).catch(err => {
 					console.error(`Query failed: "${query.substring(0, 50)}..."`, err.message);
@@ -633,6 +653,25 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 
 		console.log(`[Bulk Search] Complete: ${allResults.length} unique from ${totalRawSearched} raw, ${usedQueries.length} queries, ${round} rounds. Reason: ${stopReason}`);
 
+		// Fetch text content for ALL unique URLs at once (saves ~24% on text costs)
+		if (allResults.length > 0) {
+			try {
+				const contentsStart = Date.now();
+				console.log(`[Bulk Search] Fetching text for ${allResults.length} unique profiles...`);
+				const uniqueUrls = allResults.map(r => r.url);
+				const contents = await this.exa.getContents(uniqueUrls);
+				const textMap = new Map(contents.map(c => [c.url, c.text]));
+
+				// Merge text into results
+				for (const result of allResults) {
+					result.text = textMap.get(result.url) || '';
+				}
+				console.log(`[Bulk Search] Fetched text for ${contents.length} profiles in ${Date.now() - contentsStart}ms`);
+			} catch (error) {
+				console.error('[Bulk Search] Failed to fetch contents, proceeding without text:', error);
+			}
+		}
+
 		return {
 			results: allResults,
 			stats: {
@@ -690,11 +729,11 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 			console.log(`Generated ${searchQueries.length} search queries:`, searchQueries);
 		}
 
-		// Step 2: Run all queries in parallel (100 results each, Exa max)
-		console.log(`Searching with ${searchQueries.length} queries (100 results each)...`);
+		// Step 2: Run all queries in parallel WITHOUT text (cheaper)
+		console.log(`Searching with ${searchQueries.length} queries (100 results each, no text)...`);
 
 		const searchPromises = searchQueries.map(query =>
-			this.exa.searchPeople(query, { numResults: 100 })
+			this.exa.searchPeople(query, { numResults: 100, includeText: false })
 		);
 
 		const allResults = await Promise.all(searchPromises);
@@ -709,6 +748,24 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 					seenUrls.add(result.url);
 					uniqueResults.push(result);
 				}
+			}
+		}
+
+		console.log(`Found ${uniqueResults.length} unique profiles (deduped, fetching text...)`);
+
+		// Step 4: Fetch text content ONLY for unique URLs
+		if (uniqueResults.length > 0) {
+			try {
+				const uniqueUrls = uniqueResults.map(r => r.url);
+				const contents = await this.exa.getContents(uniqueUrls);
+				const textMap = new Map(contents.map(c => [c.url, c.text]));
+
+				for (const result of uniqueResults) {
+					result.text = textMap.get(result.url) || '';
+				}
+				console.log(`Fetched text for ${contents.length} unique profiles`);
+			} catch (error) {
+				console.error('Failed to fetch contents:', error);
 			}
 		}
 
