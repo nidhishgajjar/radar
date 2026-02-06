@@ -408,7 +408,6 @@ export class AgenticSearchService {
 		}
 
 		console.log(`Applying LLM filtering to ${results.length} results in parallel...`);
-		console.log(`[Filter Debug] filters:`, JSON.stringify(filters));
 
 		// Track progress
 		let processed = 0;
@@ -417,18 +416,13 @@ export class AgenticSearchService {
 		// Pre-filter: Check titles for obvious internal employees BEFORE calling LLM
 		// This is fast, reliable, and saves API calls + avoids timeout issues
 		const excludeEmployer = filters?.excludeCurrentEmployer;
-		console.log(`[Filter Debug] excludeEmployer: "${excludeEmployer}"`);
 
 		// Process ALL results in parallel
 		const filterPromises = results.map(async (result) => {
 			try {
 				// FAST PATH: Title-based detection of internal employees
 				// If title clearly shows they work at the excluded employer, skip LLM
-				const titleMatch = excludeEmployer ? this.titleIndicatesEmployer(result.title, excludeEmployer) : false;
-				console.log(`[Pre-filter Check] title="${result.title.substring(0, 50)}" employer="${excludeEmployer}" match=${titleMatch}`);
-
-				if (excludeEmployer && titleMatch) {
-					console.log(`[Pre-filter] Internal employee detected from title: "${result.title.substring(0, 60)}..."`);
+				if (excludeEmployer && this.titleIndicatesEmployer(result.title, excludeEmployer)) {
 					result.filterMetadata = {
 						isExternal: false,
 						fitScore: 15, // Low score - they already work there
