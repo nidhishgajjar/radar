@@ -5,7 +5,7 @@ import { QUERY_REFINEMENT_ENABLED } from '$env/static/private';
 import type { SearchResult, SearchFilters } from '$lib/types/exa';
 import { filterStateManager } from './filter-state-manager';
 import { companyEnrichment } from './company-enrichment';
-import { extractCompanyLinkedInUrls, getCurrentCompanyUrl } from '$lib/utils/company-urls';
+import { extractCompanyLinkedInUrls, getCurrentCompanyUrl, normalizeLinkedInUrl } from '$lib/utils/company-urls';
 
 interface RefinedQuery {
 	original: string;
@@ -374,10 +374,7 @@ export class AgenticSearchService {
 				for (const result of uniqueResults) {
 					const currentCompany = getCurrentCompanyUrl(result);
 					if (currentCompany) {
-						const normalized = currentCompany.linkedinUrl
-							.replace(/^http:/, 'https:')
-							.replace(/\/+$/, '')
-							.replace('://www.', '://');
+						const normalized = normalizeLinkedInUrl(currentCompany.linkedinUrl);
 						const pageData = companyResults.get(normalized);
 						if (pageData) {
 							result.companyData = pageData;

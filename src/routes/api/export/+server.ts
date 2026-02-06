@@ -6,7 +6,7 @@ import { companyEnrichment } from '$lib/server/company-enrichment';
 import { generateCSV } from '$lib/utils/csv';
 import { ClaudeClient } from '$lib/server/claude-client';
 import type { SearchResult, SearchFilters } from '$lib/types/exa';
-import { extractCompanyLinkedInUrls, getCurrentCompanyUrl } from '$lib/utils/company-urls';
+import { extractCompanyLinkedInUrls, getCurrentCompanyUrl, normalizeLinkedInUrl } from '$lib/utils/company-urls';
 
 const agenticSearch = new AgenticSearchService();
 
@@ -145,10 +145,7 @@ async function processExport(
 			for (const result of allResults) {
 				const currentCompany = getCurrentCompanyUrl(result);
 				if (currentCompany) {
-					const normalized = currentCompany.linkedinUrl
-						.replace(/^http:/, 'https:')
-						.replace(/\/+$/, '')
-						.replace('://www.', '://');
+					const normalized = normalizeLinkedInUrl(currentCompany.linkedinUrl);
 					const pageData = enrichmentResult.results.get(normalized);
 					if (pageData) {
 						result.companyData = pageData;

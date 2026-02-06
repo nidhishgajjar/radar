@@ -9,7 +9,7 @@ interface CompanyUrlEntry {
  * Normalize a LinkedIn company URL for deduplication.
  * Strips trailing slashes, www prefix, ensures https.
  */
-function normalizeLinkedInUrl(url: string): string {
+export function normalizeLinkedInUrl(url: string): string {
 	return url
 		.replace(/^http:/, 'https:')
 		.replace(/\/+$/, '')
