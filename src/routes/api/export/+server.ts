@@ -2,11 +2,10 @@ import type { RequestHandler } from './$types';
 import { json } from '@sveltejs/kit';
 import { AgenticSearchService } from '$lib/server/agentic-search';
 import { exportStateManager, type ExportStats } from '$lib/server/export-state-manager';
-import { companyEnrichment } from '$lib/server/company-enrichment';
 import { generateCSV } from '$lib/utils/csv';
 import { ClaudeClient } from '$lib/server/claude-client';
 import type { SearchResult, SearchFilters } from '$lib/types/exa';
-import { extractCompanyLinkedInUrls, getCurrentCompanyUrl, normalizeLinkedInUrl } from '$lib/utils/company-urls';
+import { extractCurrentCompanyData } from '$lib/utils/company-urls';
 
 const agenticSearch = new AgenticSearchService();
 
@@ -127,32 +126,22 @@ async function processExport(
 
 		console.log(`[Export ${jobId}] Bulk search complete: ${searchStats.totalRawSearched} raw → ${searchStats.totalAfterDedup} unique (${searchStats.stopReason})`);
 
-		// ========== Company Enrichment via LinkedIn URLs ==========
-		// Step 1: Extract LinkedIn company URLs from text and enrich via getContents
+		// ========== Company Enrichment from Inline Text ==========
+		// Extract company data directly from person profile text (free — no extra API calls)
 		exportStateManager.updateStatus(jobId, 'enriching', 45);
 
-		const companyUrls = extractCompanyLinkedInUrls(allResults);
-		let exaEnrichmentCost = 0;
+		let companyCount = 0;
+		const exaEnrichmentCost = 0;
 
-		console.log(`[Export ${jobId}] Enriching ${companyUrls.size} unique companies from LinkedIn URLs...`);
-
-		if (companyUrls.size > 0) {
-			const enrichmentResult = await companyEnrichment.enrichFromLinkedInUrls(companyUrls);
-			exaEnrichmentCost = enrichmentResult.stats.estimatedCost;
-			console.log(`[Export ${jobId}] Enriched ${enrichmentResult.results.size}/${enrichmentResult.stats.total} companies ($${exaEnrichmentCost.toFixed(3)})`);
-
-			// Attach companyData to each result by matching current company URL
-			for (const result of allResults) {
-				const currentCompany = getCurrentCompanyUrl(result);
-				if (currentCompany) {
-					const normalized = normalizeLinkedInUrl(currentCompany.linkedinUrl);
-					const pageData = enrichmentResult.results.get(normalized);
-					if (pageData) {
-						result.companyData = pageData;
-					}
-				}
+		for (const result of allResults) {
+			const companyData = extractCurrentCompanyData(result);
+			if (companyData) {
+				result.companyData = companyData;
+				companyCount++;
 			}
 		}
+
+		console.log(`[Export ${jobId}] Extracted company data for ${companyCount}/${allResults.length} profiles from text`);
 
 		exportStateManager.updateProgress(jobId, 60, allResults.length);
 

@@ -4,8 +4,7 @@ import { ClaudeError, ClaudeErrorType } from '$lib/types/claude';
 import { QUERY_REFINEMENT_ENABLED } from '$env/static/private';
 import type { SearchResult, SearchFilters } from '$lib/types/exa';
 import { filterStateManager } from './filter-state-manager';
-import { companyEnrichment } from './company-enrichment';
-import { extractCompanyLinkedInUrls, getCurrentCompanyUrl, normalizeLinkedInUrl } from '$lib/utils/company-urls';
+import { extractCurrentCompanyData } from '$lib/utils/company-urls';
 
 interface RefinedQuery {
 	original: string;
@@ -362,31 +361,16 @@ export class AgenticSearchService {
 
 		console.log(`Found ${uniqueResults.length} unique profiles with text`);
 
-		// Step 5: Extract LinkedIn company URLs and enrich company pages
-		const companyUrls = extractCompanyLinkedInUrls(uniqueResults);
-		if (companyUrls.size > 0) {
-			try {
-				const enrichStart = Date.now();
-				console.log(`Enriching ${companyUrls.size} unique companies from LinkedIn URLs...`);
-				const { results: companyResults } = await companyEnrichment.enrichFromLinkedInUrls(companyUrls);
-
-				// Attach companyData to each result by matching current company URL
-				for (const result of uniqueResults) {
-					const currentCompany = getCurrentCompanyUrl(result);
-					if (currentCompany) {
-						const normalized = normalizeLinkedInUrl(currentCompany.linkedinUrl);
-						const pageData = companyResults.get(normalized);
-						if (pageData) {
-							result.companyData = pageData;
-						}
-					}
-				}
-
-				console.log(`Company enrichment: ${companyResults.size} pages in ${Date.now() - enrichStart}ms`);
-			} catch (error) {
-				console.error('Company enrichment failed, proceeding without:', error);
+		// Step 5: Extract company data from inline text (free — no extra API calls)
+		let companyCount = 0;
+		for (const result of uniqueResults) {
+			const companyData = extractCurrentCompanyData(result);
+			if (companyData) {
+				result.companyData = companyData;
+				companyCount++;
 			}
 		}
+		console.log(`Extracted company data for ${companyCount}/${uniqueResults.length} profiles from text`);
 
 		// Use employer from URL if not explicitly set in filters
 		const extractedEmployer = this.isURL(userQuery) ? this.extractEmployerFromURL(userQuery) : null;
