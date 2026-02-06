@@ -50,14 +50,13 @@ function runClaudePrompt(systemPrompt, userPrompt, options = {}) {
 	return new Promise((resolve, reject) => {
 		const { maxTokens = 1000, timeoutMs = 30000 } = options;
 
-		const args = ['-p', userPrompt, '--output-format', 'text'];
+		const args = ['-p', userPrompt, '--output-format', 'text', '--model', 'sonnet'];
 
 		if (systemPrompt) {
 			args.push('--system-prompt', systemPrompt);
 		}
 
-		// Note: claude -p doesn't have a max-tokens flag, but we can use --max-turns 1
-		// to ensure it's a single response
+		// Ensure single response
 		args.push('--max-turns', '1');
 
 		console.log(`[Claude API] Running prompt (${userPrompt.length} chars, timeout=${timeoutMs}ms)`);
