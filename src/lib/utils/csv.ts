@@ -115,7 +115,12 @@ export function generateCSV(results: SearchResult[]): string {
 		'LinkedIn URL',
 		'Fit Score',
 		'Recently Left',
-		'Key Highlights'
+		'Matching Factors',
+		'Company Description',
+		'Company Industry',
+		'Company Headcount',
+		'Company HQ',
+		'Company LinkedIn'
 	];
 
 	const rows = results.map((result) => {
@@ -124,8 +129,15 @@ export function generateCSV(results: SearchResult[]): string {
 		const fitScore = result.filterMetadata?.fitScore ?? result.score ?? '';
 		const recentlyLeft = result.filterMetadata?.recentlyLeft ? 'Yes' : '';
 
-		// Use AI-generated key highlights from filterMetadata, not raw Exa highlights
-		const keyHighlights = result.filterMetadata?.keyHighlights?.slice(0, 3).join('; ') ?? '';
+		// Use matchingFactors (new) or fall back to keyHighlights (legacy)
+		const matchingFactors = (result.filterMetadata?.matchingFactors || result.filterMetadata?.keyHighlights)?.slice(0, 3).join('; ') ?? '';
+
+		// Company enrichment data
+		const companyDesc = result.companyData?.description ?? '';
+		const companyIndustry = result.companyData?.industry ?? '';
+		const companyHeadcount = result.companyData?.headcount ? String(result.companyData.headcount) : '';
+		const companyHQ = result.companyData?.headquarters ?? '';
+		const companyLinkedIn = result.companyData?.linkedinUrl ?? '';
 
 		return [
 			escapeCSVValue(qualified),
@@ -135,7 +147,12 @@ export function generateCSV(results: SearchResult[]): string {
 			escapeCSVValue(result.url),
 			escapeCSVValue(String(fitScore)),
 			escapeCSVValue(recentlyLeft),
-			escapeCSVValue(keyHighlights)
+			escapeCSVValue(matchingFactors),
+			escapeCSVValue(companyDesc),
+			escapeCSVValue(companyIndustry),
+			escapeCSVValue(companyHeadcount),
+			escapeCSVValue(companyHQ),
+			escapeCSVValue(companyLinkedIn)
 		].join(',');
 	});
 

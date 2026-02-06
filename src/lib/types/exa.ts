@@ -46,6 +46,44 @@ export interface SearchFilters {
 	flexibleLocation?: boolean;
 }
 
+// Entity types from Exa people search
+export interface EntityCompanyRef {
+	id?: string | null;
+	name?: string | null;
+}
+
+export interface WorkHistoryEntry {
+	title?: string | null;
+	location?: string | null;
+	dates?: { from?: string | null; to?: string | null } | null;
+	company?: EntityCompanyRef | null;
+}
+
+export interface PersonEntity {
+	id: string;
+	type: 'person';
+	version: number;
+	properties: {
+		name?: string | null;
+		location?: string | null;
+		workHistory?: WorkHistoryEntry[];
+	};
+}
+
+// Company data from LinkedIn page enrichment
+export interface CompanyPageData {
+	name: string;
+	linkedinUrl: string;
+	description?: string;
+	industry?: string;
+	headcount?: number;
+	headquarters?: string;
+	founded?: string;
+	specialties?: string[];
+	website?: string;
+	rawSnippet?: string;
+}
+
 export interface SearchResult {
 	/** Result ID */
 	id: string;
@@ -80,6 +118,12 @@ export interface SearchResult {
 	/** Image URL */
 	image?: string;
 
+	/** Exa entity data (people search) */
+	entities?: PersonEntity[];
+
+	/** Enriched company data from LinkedIn page */
+	companyData?: CompanyPageData;
+
 	/** Filtering metadata (added by post-processing) */
 	filterMetadata?: {
 		currentEmployer?: string;
@@ -88,6 +132,8 @@ export interface SearchResult {
 		reasoning: string;
 		recentlyLeft?: boolean;
 		qualified?: boolean;
+		matchingFactors?: string[];
+		keyHighlights?: string[];
 	};
 }
 

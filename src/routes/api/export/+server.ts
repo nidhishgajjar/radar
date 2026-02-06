@@ -6,6 +6,7 @@ import { companyEnrichment } from '$lib/server/company-enrichment';
 import { generateCSV } from '$lib/utils/csv';
 import { ClaudeClient } from '$lib/server/claude-client';
 import type { SearchResult, SearchFilters } from '$lib/types/exa';
+import { extractCompanyLinkedInUrls, getCurrentCompanyUrl } from '$lib/utils/company-urls';
 
 const agenticSearch = new AgenticSearchService();
 
@@ -21,23 +22,6 @@ function isURL(text: string): boolean {
 	}
 }
 
-/**
- * Extract company name from LinkedIn title
- */
-function extractCompanyFromTitle(title: string): string | null {
-	// Try to extract company from "Name at Company" or "Name | Role at Company"
-	const atMatch = title.match(/(?:at|@)\s+([^|]+?)(?:\s*[|]|$)/i);
-	if (atMatch) return atMatch[1].trim();
-
-	// Try "Role, Company" pattern
-	const parts = title.split(',');
-	if (parts.length >= 2) {
-		const lastPart = parts[parts.length - 1].trim();
-		if (lastPart.length > 2 && lastPart.length < 50) return lastPart;
-	}
-
-	return null;
-}
 
 export const POST: RequestHandler = async ({ request }) => {
 	try {
@@ -143,35 +127,31 @@ async function processExport(
 
 		console.log(`[Export ${jobId}] Bulk search complete: ${searchStats.totalRawSearched} raw → ${searchStats.totalAfterDedup} unique (${searchStats.stopReason})`);
 
-		// ========== NEW FLOW: Enrich BEFORE Filter ==========
-		// Step 1: Company enrichment for ALL candidates (so LLM can use company data for filtering)
+		// ========== Company Enrichment via LinkedIn URLs ==========
+		// Step 1: Extract LinkedIn company URLs from text and enrich via getContents
 		exportStateManager.updateStatus(jobId, 'enriching', 45);
 
-		// Extract unique company names from ALL results
-		const companyNames = allResults
-			.map(r => extractCompanyFromTitle(r.title))
-			.filter((c): c is string => !!c && c.length > 2);
-
-		const uniqueCompanies = [...new Set(companyNames)];
+		const companyUrls = extractCompanyLinkedInUrls(allResults);
 		let exaEnrichmentCost = 0;
-		const companyDataMap = new Map<string, SearchResult['companyData']>();
 
-		console.log(`[Export ${jobId}] Enriching ${uniqueCompanies.length} unique companies BEFORE filtering...`);
+		console.log(`[Export ${jobId}] Enriching ${companyUrls.size} unique companies from LinkedIn URLs...`);
 
-		if (uniqueCompanies.length > 0) {
-			const enrichmentResult = await companyEnrichment.enrichCompanies(uniqueCompanies, { includeNews: false });
+		if (companyUrls.size > 0) {
+			const enrichmentResult = await companyEnrichment.enrichFromLinkedInUrls(companyUrls);
 			exaEnrichmentCost = enrichmentResult.stats.estimatedCost;
-			console.log(`[Export ${jobId}] Enriched ${enrichmentResult.stats.companiesFound}/${enrichmentResult.stats.companiesSearched} companies ($${exaEnrichmentCost.toFixed(3)})`);
+			console.log(`[Export ${jobId}] Enriched ${enrichmentResult.results.size}/${enrichmentResult.stats.total} companies ($${exaEnrichmentCost.toFixed(3)})`);
 
-			// Build company data map and attach to results
+			// Attach companyData to each result by matching current company URL
 			for (const result of allResults) {
-				const company = extractCompanyFromTitle(result.title);
-				if (company) {
-					const normalizedKey = company.toLowerCase().replace(/[^a-z0-9]/g, '');
-					const companyData = enrichmentResult.results.get(normalizedKey);
-					if (companyData) {
-						result.companyData = companyData;
-						companyDataMap.set(normalizedKey, companyData);
+				const currentCompany = getCurrentCompanyUrl(result);
+				if (currentCompany) {
+					const normalized = currentCompany.linkedinUrl
+						.replace(/^http:/, 'https:')
+						.replace(/\/+$/, '')
+						.replace('://www.', '://');
+					const pageData = enrichmentResult.results.get(normalized);
+					if (pageData) {
+						result.companyData = pageData;
 					}
 				}
 			}
@@ -196,6 +176,9 @@ async function processExport(
 			return {
 				...result,
 				filterMetadata: {
+					isExternal: true as boolean,
+					fitScore: 0,
+					reasoning: '',
 					...result.filterMetadata,
 					qualified: isQualified
 				}

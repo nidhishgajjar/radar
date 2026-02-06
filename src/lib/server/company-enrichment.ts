@@ -6,6 +6,8 @@
 
 import Exa from 'exa-js';
 import { EXA_API_KEY } from '$env/static/private';
+import { ExaWrapper } from './exa-wrapper';
+import type { CompanyPageData } from '$lib/types/exa';
 
 export interface CompanySignals {
 	recentFunding?: {
@@ -69,6 +71,9 @@ export interface EnrichmentStats {
 // In-memory cache for company data (persists across requests)
 const companyCache = new Map<string, CompanyData>();
 
+// Cache for LinkedIn page enrichment (keyed by normalized LinkedIn URL)
+const linkedInPageCache = new Map<string, CompanyPageData>();
+
 // Data provider sites to search
 const DATA_PROVIDER_DOMAINS = [
 	'zoominfo.com',
@@ -109,9 +114,11 @@ function sleep(ms: number): Promise<void> {
 
 export class CompanyEnrichmentService {
 	private exa: Exa;
+	private exaWrapper: ExaWrapper;
 
 	constructor() {
 		this.exa = new Exa(EXA_API_KEY);
+		this.exaWrapper = new ExaWrapper();
 	}
 
 	/**
@@ -636,6 +643,133 @@ export class CompanyEnrichmentService {
 	}
 
 	/**
+	 * Parse a LinkedIn company page text into CompanyPageData.
+	 */
+	private parseLinkedInPage(text: string, name: string, linkedinUrl: string): CompanyPageData {
+		const data: CompanyPageData = { name, linkedinUrl };
+
+		// Extract description — first substantial paragraph
+		const lines = text.split('\n').filter(l => l.trim().length > 50 && !l.includes('cookie') && !l.includes('sign in') && !l.includes('Sign in'));
+		if (lines.length > 0) {
+			data.description = lines[0].substring(0, 200);
+		}
+
+		// Industry
+		const industryMatch = text.match(/industry[:\s]*([A-Za-z &\/\-]+?)(?:\s*·|\s*\||\s*,|\n|$)/i)
+			|| text.match(/([A-Za-z &\/\-]+)\s*·\s*[\d,]+\s*employees/i);
+		if (industryMatch && industryMatch[1].length < 40) {
+			data.industry = industryMatch[1].trim();
+		}
+
+		// Headcount
+		const headcountMatch = text.match(/(\d{1,3}(?:,\d{3})*)\s*employees/i)
+			|| text.match(/company size[:\s]*(\d{1,3}(?:,\d{3})*)/i)
+			|| text.match(/(\d+)\s*-\s*(\d+)\s*employees/i);
+		if (headcountMatch) {
+			data.headcount = parseInt((headcountMatch[2] || headcountMatch[1]).replace(/,/g, ''));
+		}
+
+		// Headquarters
+		const hqMatch = text.match(/(?:headquarters|headquartered|hq)[:\s]*([A-Za-z\s,]+?)(?:\s*·|\s*\||\n|$)/i)
+			|| text.match(/([A-Za-z]+,\s*[A-Za-z]+)\s*·\s*Founded/i);
+		if (hqMatch && hqMatch[1].length < 50 && hqMatch[1].length > 3) {
+			data.headquarters = hqMatch[1].trim();
+		}
+
+		// Founded
+		const foundedMatch = text.match(/founded[:\s]*(\d{4})/i) || text.match(/·\s*Founded\s*(\d{4})/i);
+		if (foundedMatch) {
+			data.founded = foundedMatch[1];
+		}
+
+		// Specialties
+		const specialtiesMatch = text.match(/specialties[:\s]*([^\n]+)/i);
+		if (specialtiesMatch) {
+			data.specialties = specialtiesMatch[1].split(/[,;]/).map(s => s.trim()).filter(s => s.length > 0 && s.length < 40);
+		}
+
+		// Website
+		const websiteMatch = text.match(/(?:website|url|site)[:\s]*(https?:\/\/[^\s]+)/i)
+			|| text.match(/(https?:\/\/(?:www\.)?[a-z0-9-]+\.[a-z]{2,})/i);
+		if (websiteMatch && !websiteMatch[1].includes('linkedin.com')) {
+			data.website = websiteMatch[1];
+		}
+
+		// rawSnippet — compact text for LLM context
+		data.rawSnippet = text.replace(/\s+/g, ' ').substring(0, 500);
+
+		return data;
+	}
+
+	/**
+	 * Enrich companies by fetching their LinkedIn company pages via getContents.
+	 * Much cheaper than search-based enrichment: $1/1000 pages vs $5/1000 searches.
+	 *
+	 * @param companyUrls Map of normalizedUrl -> { name, linkedinUrl }
+	 */
+	async enrichFromLinkedInUrls(
+		companyUrls: Map<string, { name: string; linkedinUrl: string }>
+	): Promise<{ results: Map<string, CompanyPageData>; stats: { total: number; cached: number; fetched: number; estimatedCost: number } }> {
+		const results = new Map<string, CompanyPageData>();
+		let cached = 0;
+		const urlsToFetch: Array<{ normalized: string; name: string; linkedinUrl: string }> = [];
+
+		// Check cache first
+		for (const [normalized, entry] of companyUrls) {
+			if (linkedInPageCache.has(normalized)) {
+				results.set(normalized, linkedInPageCache.get(normalized)!);
+				cached++;
+			} else {
+				urlsToFetch.push({ normalized, ...entry });
+			}
+		}
+
+		if (urlsToFetch.length > 0) {
+			try {
+				const urls = urlsToFetch.map(e => e.linkedinUrl);
+				console.log(`[Enrichment] Fetching ${urls.length} LinkedIn company pages via getContents...`);
+
+				const contents = await this.exaWrapper.getContents(urls);
+
+				// Build URL -> text map
+				const textMap = new Map<string, string>();
+				for (const c of contents) {
+					textMap.set(c.url, c.text || '');
+				}
+
+				// Parse each page
+				for (const entry of urlsToFetch) {
+					const text = textMap.get(entry.linkedinUrl) || '';
+					if (text.length > 50) {
+						const pageData = this.parseLinkedInPage(text, entry.name, entry.linkedinUrl);
+						results.set(entry.normalized, pageData);
+						linkedInPageCache.set(entry.normalized, pageData);
+					}
+				}
+
+				console.log(`[Enrichment] Parsed ${results.size - cached} LinkedIn company pages`);
+			} catch (error) {
+				console.error('[Enrichment] Failed to fetch LinkedIn company pages:', error);
+			}
+		}
+
+		const fetched = urlsToFetch.length;
+		const estimatedCost = fetched * 0.001; // $1/1000 pages
+
+		return {
+			results,
+			stats: { total: companyUrls.size, cached, fetched, estimatedCost }
+		};
+	}
+
+	/**
+	 * Get cached LinkedIn page data by normalized URL
+	 */
+	getLinkedInPageData(normalizedUrl: string): CompanyPageData | null {
+		return linkedInPageCache.get(normalizedUrl) || null;
+	}
+
+	/**
 	 * Get company data for a result by matching company name
 	 */
 	getCompanyData(companyName: string): CompanyData | null {
@@ -648,6 +782,7 @@ export class CompanyEnrichmentService {
 	 */
 	clearCache(): void {
 		companyCache.clear();
+		linkedInPageCache.clear();
 	}
 
 	/**

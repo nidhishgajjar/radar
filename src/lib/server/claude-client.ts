@@ -284,23 +284,28 @@ Return ONLY a JSON array of ${numQueries} search query strings.`;
 
 	/**
 	 * Filter and rank a candidate profile against job requirements.
+	 * Accepts optional company context from LinkedIn page enrichment.
 	 */
 	async filterAndRankCandidate(
 		profile: string,
 		jobDescription: string,
 		excludeEmployer?: string,
-		minYearsExperience?: number
+		minYearsExperience?: number,
+		companyContext?: string
 	): Promise<{
 		currentEmployer?: string;
 		isExternal: boolean;
 		fitScore: number;
 		reasoning: string;
 		recentlyLeft?: boolean;
+		matchingFactors?: string[];
 		keyHighlights?: string[];
 	}> {
-		const prompt = `${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}" - if they work there, isExternal:false, fitScore:15.\n` : ''}Job: ${jobDescription.substring(0, 300)}
-Profile: ${profile.substring(0, 800)}
-Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"keyHighlights":["h1","h2"],"reasoning":"brief"}`;
+		const prompt = `${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}" - if they work there, isExternal:false, fitScore:15.\n` : ''}Job: ${jobDescription.substring(0, 400)}
+
+Profile: ${profile.substring(0, 1000)}
+${companyContext ? `\nCurrent Company: ${companyContext}` : ''}
+Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"matchingFactors":["factor1","factor2","factor3"],"reasoning":"2-3 sentence explanation"}`;
 
 		try {
 			const data = await this.fetchWithRetry({
@@ -311,13 +316,19 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 			const content = data.content.trim();
 
 			try {
-				return JSON.parse(content);
+				const parsed = JSON.parse(content);
+				// Normalize: support both matchingFactors and legacy keyHighlights
+				if (parsed.matchingFactors && !parsed.keyHighlights) {
+					parsed.keyHighlights = parsed.matchingFactors;
+				}
+				return parsed;
 			} catch {
 				return {
 					currentEmployer: undefined,
 					isExternal: true,
 					fitScore: 20,
 					reasoning: 'Unable to parse response',
+					matchingFactors: [],
 					keyHighlights: []
 				};
 			}
@@ -328,6 +339,7 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 				isExternal: true,
 				fitScore: 20,
 				reasoning: 'Filtering failed',
+				matchingFactors: [],
 				keyHighlights: []
 			};
 		}
