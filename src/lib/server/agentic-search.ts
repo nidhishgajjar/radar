@@ -52,6 +52,53 @@ export class AgenticSearchService {
 	}
 
 	/**
+	 * Extract employer name from a job URL hostname
+	 */
+	extractEmployerFromURL(url: string): string | null {
+		try {
+			const urlObj = new URL(url);
+			const hostname = urlObj.hostname.toLowerCase();
+
+			// Common patterns for career sites
+			// careers.companyname.com or companyname.com/careers or jobs.companyname.com
+			const patterns = [
+				/^careers\.(.+?)\.(com|ca|org|net|io)$/,
+				/^jobs\.(.+?)\.(com|ca|org|net|io)$/,
+				/^(.+?)\.recruitee\.com$/,
+				/^(.+?)\.greenhouse\.io$/,
+				/^(.+?)\.lever\.co$/,
+				/^(.+?)\.workday\.com$/,
+				/^(.+?)\.myworkdayjobs\.com$/,
+			];
+
+			for (const pattern of patterns) {
+				const match = hostname.match(pattern);
+				if (match) {
+					// Clean up the company name
+					return match[1].replace(/-/g, ' ').replace(/healthservices/gi, 'Health Services').trim();
+				}
+			}
+
+			// Fallback: extract main domain part
+			const parts = hostname.replace(/^(www\.|careers\.|jobs\.)/, '').split('.');
+			if (parts.length >= 2) {
+				// Return the main domain name, cleaned up
+				const companyPart = parts[0];
+				// Convert camelCase or hyphenated to spaces
+				return companyPart
+					.replace(/([a-z])([A-Z])/g, '$1 $2')
+					.replace(/-/g, ' ')
+					.replace(/healthservices/gi, 'Health Services')
+					.trim();
+			}
+
+			return null;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
 	 * Process a job URL: fetch content and extract search query
 	 */
 	async processJobURL(url: string): Promise<string> {
@@ -223,21 +270,37 @@ export class AgenticSearchService {
 			console.log('Generating recruitment queries...');
 
 			let jobContent = userQuery;
+			let employerFromUrl: string | null = null;
 
-			// Check if input is a URL - fetch the job content
+			// Check if input is a URL - fetch the job content AND extract employer
 			if (this.isURL(userQuery)) {
 				console.log('Detected job URL, fetching content...');
+
+				// Extract employer from URL hostname
+				employerFromUrl = this.extractEmployerFromURL(userQuery);
+				if (employerFromUrl) {
+					console.log(`Extracted employer from URL: "${employerFromUrl}"`);
+				}
+
 				const content = await this.fetchJobContent(userQuery);
 				if (content) {
 					jobContent = content;
 					console.log('Fetched job content:', content.substring(0, 200) + '...');
+
+					// Prepend employer context to job content so LLM knows this is the hiring company
+					if (employerFromUrl) {
+						jobContent = `HIRING COMPANY: ${employerFromUrl}\n\n${content}`;
+					}
 				}
 			}
+
+			// Use employer from URL if not explicitly set in filters
+			const excludeEmployer = filters?.excludeCurrentEmployer || employerFromUrl || undefined;
 
 			// Generate queries directly from content (one LLM call)
 			const generated = await this.claude.generateRecruitmentQueries(
 				jobContent,
-				filters?.excludeCurrentEmployer,
+				excludeEmployer,
 				filters?.geographicFocus,
 				filters?.flexibleLocation ?? false
 			);
@@ -297,6 +360,9 @@ export class AgenticSearchService {
 
 		console.log(`Found ${uniqueResults.length} unique profiles with text`);
 
+		// Use employer from URL if not explicitly set in filters
+		const extractedEmployer = this.isURL(userQuery) ? this.extractEmployerFromURL(userQuery) : null;
+
 		// Return immediately with raw results - NO filtering applied
 		return {
 			results: uniqueResults,
@@ -308,7 +374,8 @@ export class AgenticSearchService {
 				total_results: uniqueResults.length,
 				queries_used: searchQueries,
 				queries_generated: queriesGenerated,
-				filtering_applied: false
+				filtering_applied: false,
+				extracted_employer: extractedEmployer
 			}
 		};
 	}

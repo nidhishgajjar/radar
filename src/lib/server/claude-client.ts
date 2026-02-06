@@ -298,20 +298,29 @@ Return ONLY a JSON array of ${numQueries} search query strings.`;
 		recentlyLeft?: boolean;
 		keyHighlights?: string[];
 	}> {
-		const prompt = `Analyze LinkedIn profile for job fit.
+		// Build the hiring company exclusion instruction
+		const exclusionInstruction = excludeEmployer
+			? `
+CRITICAL - HIRING COMPANY: "${excludeEmployer}"
+We are looking to RECRUIT candidates for this company. Candidates who CURRENTLY work at "${excludeEmployer}" are NOT good candidates because they already work there!
+- If someone currently works at "${excludeEmployer}" → isExternal: false, fitScore: 10-20 (LOW)
+- We want EXTERNAL candidates from OTHER companies who could be recruited to work at "${excludeEmployer}"`
+			: '';
+
+		const prompt = `Analyze LinkedIn profile for RECRUITMENT fit. We are looking for EXTERNAL candidates to hire.
 Job: ${jobDescription}
-${excludeEmployer ? `Exclude if at: ${excludeEmployer}` : ''}
+${exclusionInstruction}
 
 Profile:
 ${profile.substring(0, 1500)}
 
 Analyze:
 1. currentEmployer: Their CURRENT company (or null if unclear/unemployed)
-2. isExternal: true if NOT currently at the hiring company
-3. fitScore: 0-100 based on skills/experience match
+2. isExternal: true if NOT currently at the hiring company${excludeEmployer ? ` ("${excludeEmployer}")` : ''}
+3. fitScore: 0-100 - IMPORTANT: If they currently work at the hiring company, score MUST be 10-20 (we can't recruit someone who already works there!)
 4. recentlyLeft: true if they show "Former" or left a relevant role in last 6 months (look for dates like "2024", "Present" endings)
 5. keyHighlights: Array of 2-3 brief highlights that make this person a good fit (e.g., "10+ years experience", "Led team of 15", "AWS certified")
-6. reasoning: Brief explanation
+6. reasoning: Brief explanation (if internal employee, explain they already work there)
 
 Return JSON only: {"currentEmployer":"name or null","isExternal":true/false,"fitScore":0-100,"recentlyLeft":true/false,"keyHighlights":["highlight1","highlight2"],"reasoning":"brief"}`;
 

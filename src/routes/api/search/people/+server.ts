@@ -36,8 +36,24 @@ export const POST: RequestHandler = async ({ request }) => {
 			numResultsPerQuery
 		);
 
-		// Start background filtering if filters are enabled
-		if (searchFilters?.externalOnly || searchFilters?.excludeCurrentEmployer) {
+		// Build effective filters - include extracted employer if not already set
+		const extractedEmployer = searchResult.metadata.extracted_employer as string | null;
+		const effectiveFilters: SearchFilters | undefined = searchFilters
+			? {
+					...searchFilters,
+					// Use extracted employer from job URL if not explicitly set
+					excludeCurrentEmployer:
+						searchFilters.excludeCurrentEmployer || extractedEmployer || undefined
+				}
+			: extractedEmployer
+				? { externalOnly: true, includeRecentDepartures: true, excludeCurrentEmployer: extractedEmployer }
+				: undefined;
+
+		// Start background filtering if filters are enabled OR if we have an extracted employer
+		const shouldFilter =
+			effectiveFilters?.externalOnly || effectiveFilters?.excludeCurrentEmployer;
+
+		if (shouldFilter) {
 			// Initialize filter state
 			filterStateManager.createFilteringTask(
 				searchResult.searchId,
@@ -46,7 +62,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 			// Run filtering in background (don't await)
 			agenticSearch
-				.filterResults(searchResult.results, query, searchFilters, searchResult.searchId)
+				.filterResults(searchResult.results, query, effectiveFilters, searchResult.searchId)
 				.then((filterResult) => {
 					// Update state with final filtered results
 					filterStateManager.markCompleted(
@@ -66,13 +82,14 @@ export const POST: RequestHandler = async ({ request }) => {
 		// Return raw results immediately with filtering_pending status
 		return json({
 			results: searchResult.results,
-			metadata: searchResult.metadata,
+			metadata: {
+				...searchResult.metadata,
+				// Include the employer being excluded for UI feedback
+				excludeCurrentEmployer: effectiveFilters?.excludeCurrentEmployer || null
+			},
 			queries: searchResult.queries,
 			searchId: searchResult.searchId,
-			status:
-				searchFilters?.externalOnly || searchFilters?.excludeCurrentEmployer
-					? 'filtering_pending'
-					: 'complete'
+			status: shouldFilter ? 'filtering_pending' : 'complete'
 		});
 	} catch (error: any) {
 		console.error('Search error:', error);

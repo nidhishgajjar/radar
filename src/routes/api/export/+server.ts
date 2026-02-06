@@ -10,6 +10,18 @@ import type { SearchResult, SearchFilters } from '$lib/types/exa';
 const agenticSearch = new AgenticSearchService();
 
 /**
+ * Check if a string is a URL
+ */
+function isURL(text: string): boolean {
+	try {
+		new URL(text.trim());
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Extract company name from LinkedIn title
  */
 function extractCompanyFromTitle(title: string): string | null {
@@ -75,13 +87,29 @@ async function processExport(
 
 		let queriesToUse = searchQueries || [];
 
+		// Check if query is a job URL - extract employer for filtering
+		let effectiveFilters = filters;
+		const isJobUrl = isURL(query);
+		if (isJobUrl) {
+			const extractedEmployer = agenticSearch.extractEmployerFromURL(query);
+			if (extractedEmployer && !filters?.excludeCurrentEmployer) {
+				console.log(`[Export ${jobId}] Extracted employer from URL: "${extractedEmployer}"`);
+				effectiveFilters = {
+					...filters,
+					externalOnly: true,
+					includeRecentDepartures: filters?.includeRecentDepartures ?? true,
+					excludeCurrentEmployer: extractedEmployer
+				};
+			}
+		}
+
 		// If no queries provided, generate them first (direct export mode)
 		if (queriesToUse.length === 0) {
 			exportStateManager.updateStatus(jobId, 'generating_queries', 2);
 			console.log(`[Export ${jobId}] Generating search queries...`);
 
 			// Use searchRaw to generate queries (it will create them if not provided)
-			const initialSearch = await agenticSearch.searchRaw(query, 1, undefined, filters, 1);
+			const initialSearch = await agenticSearch.searchRaw(query, 1, undefined, effectiveFilters, 1);
 			queriesToUse = initialSearch.queries;
 
 			console.log(`[Export ${jobId}] Generated ${queriesToUse.length} queries`);
@@ -98,7 +126,7 @@ async function processExport(
 			query,
 			targetCount,
 			queriesToUse,
-			filters,
+			effectiveFilters,
 			({ totalRaw, unique, round }) => {
 				// Update progress during fetching (5-40%)
 				const progress = 5 + Math.min(35, round * 5);
@@ -158,7 +186,7 @@ async function processExport(
 
 		// Use forceFilter=true to always run LLM filtering for export
 		// Results now have companyData attached, which the filter can use
-		const filterResult = await agenticSearch.filterResults(allResults, query, filters, undefined, true);
+		const filterResult = await agenticSearch.filterResults(allResults, query, effectiveFilters, undefined, true);
 
 		// All results now have filterMetadata. Mark qualified based on fit score threshold
 		const allWithStatus = filterResult.results.map(result => {
