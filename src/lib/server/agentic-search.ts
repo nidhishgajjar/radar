@@ -420,41 +420,53 @@ export class AgenticSearchService {
 			};
 		}
 
-		const BATCH_SIZE = 25;
+		const MAX_TOKENS_PER_BATCH = 120000; // Stay under 150K context window
 		const MAX_CONCURRENT_BATCHES = 3;
+		const CHARS_PER_TOKEN = 4;
 
-		console.log(`Applying LLM filtering to ${results.length} results in batches of ${BATCH_SIZE} (max ${MAX_CONCURRENT_BATCHES} concurrent)...`);
+		// Build all candidate texts first to estimate total size
+		const allCandidates = results.map((result, i) => {
+			let companyCtx: string | undefined;
+			if (result.companyData) {
+				const cd = result.companyData;
+				const parts = [cd.name];
+				if (cd.industry) parts.push(cd.industry);
+				if (cd.headcount) parts.push(`${cd.headcount} employees`);
+				if (cd.headquarters) parts.push(cd.headquarters);
+				companyCtx = parts.join(' | ');
+			}
+			const profile = `Title: ${result.title}\nURL: ${result.url}\n${result.text ? `Profile:\n${result.text.substring(0, 800)}` : ''}`.trim();
+			return { id: i, profile, companyContext: companyCtx };
+		});
+
+		// Estimate total tokens
+		const promptOverhead = 500; // job desc + instructions
+		const totalChars = allCandidates.reduce((sum, c) => sum + c.profile.length + (c.companyContext?.length || 0) + 30, 0);
+		const totalTokens = Math.ceil((totalChars + promptOverhead * CHARS_PER_TOKEN) / CHARS_PER_TOKEN);
+
+		// Calculate how many batches we actually need
+		const numBatches = Math.max(1, Math.ceil(totalTokens / MAX_TOKENS_PER_BATCH));
+		const batchSize = Math.ceil(results.length / numBatches);
+
+		console.log(`LLM filtering: ${results.length} results, ~${totalTokens} tokens → ${numBatches} batch(es) of ~${batchSize} (max ${MAX_CONCURRENT_BATCHES} concurrent)`);
 
 		// Track progress
 		let processed = 0;
 		const filteredResults: SearchResult[] = [];
 
-		// Build batches
+		// Build dynamic batches
 		const batches: SearchResult[][] = [];
-		for (let i = 0; i < results.length; i += BATCH_SIZE) {
-			batches.push(results.slice(i, i + BATCH_SIZE));
+		for (let i = 0; i < results.length; i += batchSize) {
+			batches.push(results.slice(i, i + batchSize));
 		}
 
-		console.log(`Split into ${batches.length} batches`);
-
 		// Process batches with concurrency limit
-		const processBatch = async (batch: SearchResult[], batchIdx: number) => {
-			// Build candidate entries for batch
-			const candidates = batch.map((result, i) => {
-				let companyCtx: string | undefined;
-				if (result.companyData) {
-					const cd = result.companyData;
-					const parts = [cd.name];
-					if (cd.industry) parts.push(cd.industry);
-					if (cd.headcount) parts.push(`${cd.headcount} employees`);
-					if (cd.headquarters) parts.push(cd.headquarters);
-					companyCtx = parts.join(' | ');
-				}
-
-				const profile = `Title: ${result.title}\nURL: ${result.url}\n${result.text ? `Profile:\n${result.text.substring(0, 800)}` : ''}`.trim();
-
-				return { id: i, profile, companyContext: companyCtx };
-			});
+		const processBatch = async (batch: SearchResult[], batchIdx: number, startIdx: number) => {
+			// Slice the pre-built candidates for this batch, re-index from 0
+			const candidates = allCandidates.slice(startIdx, startIdx + batch.length).map((c, i) => ({
+				...c,
+				id: i
+			}));
 
 			try {
 				const batchResults = await this.claude.filterCandidateBatch(
@@ -528,7 +540,8 @@ export class AgenticSearchService {
 		// Run batches with concurrency limit
 		const running: Promise<void>[] = [];
 		for (let i = 0; i < batches.length; i++) {
-			const p = processBatch(batches[i], i);
+			const startIdx = i * batchSize;
+			const p = processBatch(batches[i], i, startIdx);
 			running.push(p);
 
 			if (running.length >= MAX_CONCURRENT_BATCHES) {
