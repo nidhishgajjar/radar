@@ -12,7 +12,7 @@
 	import Toast from '../components/Toast.svelte';
 	import type { ToastType } from '../components/Toast.svelte';
 	import { exportHistory } from '$lib/stores/export.svelte';
-	import { downloadCSV, generateFilename } from '$lib/utils/csv';
+	import { downloadCSV, generateCSV, generateFilename } from '$lib/utils/csv';
 	import type { SearchResult } from '$lib/types/exa';
 
 	let query = $state('');
@@ -67,7 +67,21 @@
 		showExportModal = false;
 	}
 
-	async function handleExportStarted(jobId: string) {
+	function handleExportCurrent() {
+		if (results.length === 0) return;
+
+		// Generate CSV content from current results
+		const csvContent = generateCSV(results);
+		const filename = generateFilename(query, results.length);
+		downloadCSV(csvContent, filename);
+
+		toast = {
+			message: `Exported ${results.length} candidates`,
+			type: 'success'
+		};
+	}
+
+	async function handleExportExhaustive(jobId: string) {
 		activeExportJobId = jobId;
 		exportProgress = 0;
 		exportHistory.setActiveJob(jobId);
@@ -629,7 +643,8 @@
 		searchQueries={queries}
 		filters={{ externalOnly: true, includeRecentDepartures: true, flexibleLocation }}
 		onClose={closeExportModal}
-		onExportStarted={handleExportStarted}
+		onExportCurrent={handleExportCurrent}
+		onExportExhaustive={handleExportExhaustive}
 	/>
 {/if}
 
