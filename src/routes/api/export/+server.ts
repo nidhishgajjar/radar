@@ -4,7 +4,7 @@ import { AgenticSearchService } from '$lib/server/agentic-search';
 import { exportStateManager, type ExportStats } from '$lib/server/export-state-manager';
 import { companyEnrichment } from '$lib/server/company-enrichment';
 import { generateCSV } from '$lib/utils/csv';
-import { OpenRouterClient } from '$lib/server/openrouter-client';
+import { ClaudeClient } from '$lib/server/claude-client';
 import type { SearchResult, SearchFilters } from '$lib/types/exa';
 
 const agenticSearch = new AgenticSearchService();
@@ -71,7 +71,7 @@ async function processExport(
 ) {
 	try {
 		// Reset LLM cost tracking for this export
-		OpenRouterClient.resetSessionCost();
+		ClaudeClient.resetSessionCost();
 
 		let queriesToUse = searchQueries || [];
 
@@ -198,7 +198,7 @@ async function processExport(
 		exportStateManager.updateProgress(jobId, 92, sortedResults.length);
 
 		// Get LLM costs
-		const llmCost = OpenRouterClient.getSessionCost();
+		const llmCost = ClaudeClient.getSessionCost();
 
 		// Build final stats with costs
 		const finalStats: ExportStats = {

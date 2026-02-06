@@ -1,6 +1,6 @@
-import { OpenRouterClient } from './openrouter-client';
+import { ClaudeClient } from './claude-client';
 import { ExaWrapper } from './exa-wrapper';
-import { OpenRouterError, OpenRouterErrorType } from '$lib/types/openrouter';
+import { ClaudeError, ClaudeErrorType } from '$lib/types/claude';
 import { QUERY_REFINEMENT_ENABLED } from '$env/static/private';
 import type { SearchResult, SearchFilters } from '$lib/types/exa';
 import { filterStateManager } from './filter-state-manager';
@@ -13,14 +13,14 @@ interface RefinedQuery {
 }
 
 export class AgenticSearchService {
-	private openRouter: OpenRouterClient;
+	private claude: ClaudeClient;
 	private exa: ExaWrapper;
 	private queryCache: Map<string, { query: string; timestamp: number }>;
 	private readonly CACHE_TTL = 60 * 60 * 1000; // 1 hour
 	private readonly enableRefinement: boolean;
 
 	constructor() {
-		this.openRouter = new OpenRouterClient();
+		this.claude = new ClaudeClient();
 		this.exa = new ExaWrapper();
 		this.queryCache = new Map();
 		this.enableRefinement = QUERY_REFINEMENT_ENABLED === 'true';
@@ -59,7 +59,7 @@ export class AgenticSearchService {
 		if (!content) {
 			throw new Error('Failed to fetch job URL content');
 		}
-		return await this.openRouter.extractRequirementsFromJob(content);
+		return await this.claude.extractRequirementsFromJob(content);
 	}
 
 	async fetchJobContent(url: string): Promise<string | null> {
@@ -130,7 +130,7 @@ export class AgenticSearchService {
 		if (isJobDesc) {
 			console.log('Detected job description, extracting requirements...');
 			try {
-				const extractedQuery = await this.openRouter.extractRequirementsFromJob(userQuery);
+				const extractedQuery = await this.claude.extractRequirementsFromJob(userQuery);
 
 				if (this.isValidQuery(extractedQuery)) {
 					return {
@@ -164,7 +164,7 @@ export class AgenticSearchService {
 		let llmUsed = false;
 
 		try {
-			refined = await this.openRouter.refineQuery(userQuery);
+			refined = await this.claude.refineQuery(userQuery);
 
 			// Validate refined query
 			if (!this.isValidQuery(refined)) {
@@ -182,7 +182,7 @@ export class AgenticSearchService {
 			console.error('Query refinement failed, using original query:', error);
 
 			// Log specific error types
-			if (error instanceof OpenRouterError) {
+			if (error instanceof ClaudeError) {
 				console.error(`OpenRouter error type: ${error.type}`);
 			}
 
@@ -235,7 +235,7 @@ export class AgenticSearchService {
 			}
 
 			// Generate queries directly from content (one LLM call)
-			const generated = await this.openRouter.generateRecruitmentQueries(
+			const generated = await this.claude.generateRecruitmentQueries(
 				jobContent,
 				filters?.excludeCurrentEmployer,
 				filters?.geographicFocus,
@@ -363,7 +363,7 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 					industry: result.companyData.industry
 				} : undefined;
 
-				const filterResult = await this.openRouter.filterAndRankCandidate(
+				const filterResult = await this.claude.filterAndRankCandidate(
 					profileSummary,
 					userQuery,
 					filters?.excludeCurrentEmployer,
@@ -590,7 +590,7 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 			if (shouldGenerateMore) {
 				console.log(`[Bulk Search] Generating more queries (previous yield: ${yieldRate}%)...`);
 
-				const newQueries = await this.openRouter.generateRecruitmentQueries(
+				const newQueries = await this.claude.generateRecruitmentQueries(
 					userQuery,
 					filters?.excludeCurrentEmployer,
 					filters?.geographicFocus,
@@ -621,7 +621,7 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 				// Low yield - check if we should stop or try one more batch
 				console.log(`[Bulk Search] Low yield (${yieldRate}%) - trying one more query batch...`);
 
-				const lastChanceQueries = await this.openRouter.generateRecruitmentQueries(
+				const lastChanceQueries = await this.claude.generateRecruitmentQueries(
 					userQuery,
 					filters?.excludeCurrentEmployer,
 					filters?.geographicFocus,
@@ -717,7 +717,7 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 			const refinedQuery = await this.refineQuery(userQuery);
 
 			// Then generate multiple search angles
-			const generated = await this.openRouter.generateRecruitmentQueries(
+			const generated = await this.claude.generateRecruitmentQueries(
 				refinedQuery.refined,
 				filters?.excludeCurrentEmployer,
 				filters?.geographicFocus
@@ -784,7 +784,7 @@ URL: ${result.url}
 ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 					`.trim();
 
-					const filterResult = await this.openRouter.filterAndRankCandidate(
+					const filterResult = await this.claude.filterAndRankCandidate(
 						profileSummary,
 						userQuery,
 						filters?.excludeCurrentEmployer,

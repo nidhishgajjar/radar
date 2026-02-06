@@ -31,6 +31,7 @@
     "vite": "^6.4.1"
   },
   "dependencies": {
+    "@anthropic-ai/claude-code": "^2.1.27",
     "exa-js": "^2.1.0",
     "marked": "^17.0.1"
   }
