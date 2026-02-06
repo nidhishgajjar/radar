@@ -309,10 +309,9 @@ ${profile.substring(0, 1500)}
 Return JSON: {"currentEmployer":"company or null","isExternal":true/false,"fitScore":0-100,"recentlyLeft":true/false,"keyHighlights":["highlight1","highlight2"],"reasoning":"brief"}`;
 
 		try {
-			// Longer timeout for filtering (15s) since we run many in parallel
 			const data = await this.fetchWithRetry({
 				prompt,
-				timeoutMs: 15000
+				timeoutMs: 45000
 			});
 
 			const content = data.content.trim();
