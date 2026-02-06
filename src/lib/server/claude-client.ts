@@ -313,13 +313,11 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 			try {
 				return JSON.parse(content);
 			} catch {
-				// Fallback: assume external, low score
 				return {
 					currentEmployer: undefined,
 					isExternal: true,
-					fitScore: 40,
-					reasoning: 'Unable to parse LLM response',
-					recentlyLeft: false,
+					fitScore: 20,
+					reasoning: 'Unable to parse response',
 					keyHighlights: []
 				};
 			}
@@ -328,9 +326,8 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 			return {
 				currentEmployer: undefined,
 				isExternal: true,
-				fitScore: 40,
-				reasoning: 'Error during filtering',
-				recentlyLeft: false,
+				fitScore: 20,
+				reasoning: 'Filtering failed',
 				keyHighlights: []
 			};
 		}
