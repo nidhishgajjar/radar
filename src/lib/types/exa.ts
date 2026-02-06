@@ -89,23 +89,6 @@ export interface SearchResult {
 		recentlyLeft?: boolean;
 		qualified?: boolean;
 	};
-
-	/** Company enrichment data (added by company enrichment service) */
-	companyData?: {
-		name: string;
-		linkedinUrl?: string;
-		website?: string;
-		headcount?: number;
-		headcountRange?: string;
-		revenue?: string;
-		revenueAmount?: number;
-		funding?: string;
-		industry?: string;
-		location?: string;
-		founded?: string;
-		description?: string;
-		sourceUrl?: string;
-	};
 }
 
 export interface SearchResponse {

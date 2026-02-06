@@ -27,9 +27,7 @@
 	let hasMore = $state(false);
 	let queries: string[] = $state([]);
 	let flexibleLocation = $state(false);
-	let companyEnrichment = $state(true);
 	let searchMode = $state<'search' | 'export'>('search');
-	let enrichmentInProgress = $state(false);
 
 	// Two-phase loading state
 	let searchId = $state<string | null>(null);
@@ -117,8 +115,6 @@
 					exportStatus = `Searching for candidates... ${data.progress}%`;
 				} else if (data.status === 'filtering') {
 					exportStatus = `AI filtering candidates... ${data.progress}%`;
-				} else if (data.status === 'enriching') {
-					exportStatus = `Enriching company data... ${data.progress}%`;
 				} else if (data.status === 'generating_csv') {
 					exportStatus = 'Generating CSV file...';
 				} else if (data.status === 'queued') {
@@ -242,11 +238,6 @@
 				filteringInProgress = true;
 				pollFilterProgress(searchId);
 			}
-
-			// Phase 3: Run company enrichment in background if enabled
-			if (companyEnrichment && results.length > 0) {
-				runCompanyEnrichment(results);
-			}
 		} catch (err: any) {
 			error = err.message || 'An error occurred while searching';
 			results = [];
@@ -315,80 +306,6 @@
 		} finally {
 			loading = false;
 		}
-	}
-
-	// Run company enrichment in background
-	async function runCompanyEnrichment(searchResults: SearchResult[]) {
-		enrichmentInProgress = true;
-
-		try {
-			// Extract unique company names from results
-			const companies = searchResults
-				.map(r => r.filterMetadata?.currentEmployer || extractCompanyFromTitle(r.title))
-				.filter((c): c is string => !!c && c.length > 2);
-
-			const uniqueCompanies = [...new Set(companies)];
-
-			if (uniqueCompanies.length === 0) {
-				enrichmentInProgress = false;
-				return;
-			}
-
-			console.log(`[Enrichment] Starting enrichment for ${uniqueCompanies.length} unique companies...`);
-
-			const response = await fetch('/api/enrich', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ companies: uniqueCompanies })
-			});
-
-			const data = await response.json();
-
-			if (!response.ok) {
-				console.error('[Enrichment] Failed:', data.error);
-				enrichmentInProgress = false;
-				return;
-			}
-
-			console.log(`[Enrichment] Complete: ${data.stats.companiesFound}/${data.stats.companiesSearched} companies, $${data.stats.estimatedCost.toFixed(3)} cost`);
-
-			// Update results with company data
-			const enrichedResults = results.map(r => {
-				const company = r.filterMetadata?.currentEmployer || extractCompanyFromTitle(r.title);
-				if (!company) return r;
-
-				// Normalize company name for lookup
-				const normalizedKey = company.toLowerCase().replace(/[^a-z0-9]/g, '');
-				const companyData = data.results[normalizedKey];
-
-				if (companyData && (companyData.headcount || companyData.revenue)) {
-					return { ...r, companyData };
-				}
-				return r;
-			});
-
-			results = enrichedResults;
-		} catch (err) {
-			console.error('[Enrichment] Error:', err);
-		} finally {
-			enrichmentInProgress = false;
-		}
-	}
-
-	// Helper to extract company from title
-	function extractCompanyFromTitle(title: string): string | null {
-		// Try to extract company from "Name at Company" or "Name | Role at Company"
-		const atMatch = title.match(/(?:at|@)\s+([^|]+?)(?:\s*[|]|$)/i);
-		if (atMatch) return atMatch[1].trim();
-
-		// Try "Role, Company" pattern
-		const parts = title.split(',');
-		if (parts.length >= 2) {
-			const lastPart = parts[parts.length - 1].trim();
-			if (lastPart.length > 2 && lastPart.length < 50) return lastPart;
-		}
-
-		return null;
 	}
 
 	// Poll for filter progress and update results progressively
@@ -563,7 +480,7 @@
 			<p class="subtitle">Talent intelligence for smarter hiring</p>
 		</header>
 
-		<SearchBar bind:value={query} bind:flexibleLocation={flexibleLocation} bind:companyEnrichment={companyEnrichment} bind:searchMode={searchMode} onSearch={handleSearch} />
+		<SearchBar bind:value={query} bind:flexibleLocation={flexibleLocation} bind:searchMode={searchMode} onSearch={handleSearch} />
 
 		{#if loading}
 			<LoadingState />

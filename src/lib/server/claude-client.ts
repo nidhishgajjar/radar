@@ -289,13 +289,7 @@ Return ONLY a JSON array of ${numQueries} search query strings.`;
 		profile: string,
 		jobDescription: string,
 		excludeEmployer?: string,
-		minYearsExperience?: number,
-		companyData?: {
-			headcount?: number;
-			revenue?: string;
-			funding?: string;
-			industry?: string;
-		}
+		minYearsExperience?: number
 	): Promise<{
 		currentEmployer?: string;
 		isExternal: boolean;
@@ -304,28 +298,19 @@ Return ONLY a JSON array of ${numQueries} search query strings.`;
 		recentlyLeft?: boolean;
 		keyHighlights?: string[];
 	}> {
-		// Build company context if available
-		const companyContext = companyData ? `
-Company Data (verified):
-- Headcount: ${companyData.headcount || 'Unknown'}
-- Revenue: ${companyData.revenue || 'Unknown'}
-- Funding: ${companyData.funding || 'Unknown'}
-- Industry: ${companyData.industry || 'Unknown'}` : '';
-
 		const prompt = `Analyze LinkedIn profile for job fit.
 Job: ${jobDescription}
 ${excludeEmployer ? `Exclude if at: ${excludeEmployer}` : ''}
 
 Profile:
 ${profile.substring(0, 1500)}
-${companyContext}
 
 Analyze:
 1. currentEmployer: Their CURRENT company (or null if unclear/unemployed)
 2. isExternal: true if NOT currently at the hiring company
-3. fitScore: 0-100 based on skills/experience match${companyData ? ' AND company criteria (headcount, revenue if specified in job)' : ''}
+3. fitScore: 0-100 based on skills/experience match
 4. recentlyLeft: true if they show "Former" or left a relevant role in last 6 months (look for dates like "2024", "Present" endings)
-5. keyHighlights: Array of 2-3 brief highlights that make this person a good fit (e.g., "10+ years experience", "Led team of 15", "AWS certified"${companyData ? ', "$X revenue company"' : ''})
+5. keyHighlights: Array of 2-3 brief highlights that make this person a good fit (e.g., "10+ years experience", "Led team of 15", "AWS certified")
 6. reasoning: Brief explanation
 
 Return JSON only: {"currentEmployer":"name or null","isExternal":true/false,"fitScore":0-100,"recentlyLeft":true/false,"keyHighlights":["highlight1","highlight2"],"reasoning":"brief"}`;

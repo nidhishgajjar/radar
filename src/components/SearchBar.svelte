@@ -1,6 +1,6 @@
 <script lang="ts">
 	type SearchMode = 'search' | 'export';
-	let { value = $bindable(''), flexibleLocation = $bindable(false), companyEnrichment = $bindable(true), searchMode = $bindable<SearchMode>('search'), onSearch }: { value: string; flexibleLocation: boolean; companyEnrichment: boolean; searchMode: SearchMode; onSearch: (query: string, mode: SearchMode) => void } = $props();
+	let { value = $bindable(''), flexibleLocation = $bindable(false), searchMode = $bindable<SearchMode>('search'), onSearch }: { value: string; flexibleLocation: boolean; searchMode: SearchMode; onSearch: (query: string, mode: SearchMode) => void } = $props();
 
 	// Detect input mode
 	type InputMode = 'search' | 'url' | 'jd';
@@ -166,10 +166,6 @@
 				<label class="toggle-option">
 					<input type="checkbox" bind:checked={flexibleLocation} />
 					<span class="toggle-label">Flexible location</span>
-				</label>
-				<label class="toggle-option">
-					<input type="checkbox" bind:checked={companyEnrichment} />
-					<span class="toggle-label">Company data</span>
 				</label>
 			</div>
 

@@ -95,60 +95,6 @@
 				</div>
 			{/if}
 
-			{#if person.companyData && (person.companyData.headcount || person.companyData.revenue || person.companyData.industry)}
-				<div class="company-section">
-					<h3 class="section-title">Company Information</h3>
-					<div class="company-grid">
-						{#if person.companyData.headcount}
-							<div class="company-stat">
-								<span class="stat-label">Employees</span>
-								<span class="stat-value">{person.companyData.headcount.toLocaleString()}</span>
-							</div>
-						{/if}
-						{#if person.companyData.revenue}
-							<div class="company-stat">
-								<span class="stat-label">Revenue</span>
-								<span class="stat-value">{person.companyData.revenue}</span>
-							</div>
-						{/if}
-						{#if person.companyData.funding}
-							<div class="company-stat">
-								<span class="stat-label">Funding</span>
-								<span class="stat-value">{person.companyData.funding}</span>
-							</div>
-						{/if}
-						{#if person.companyData.industry}
-							<div class="company-stat">
-								<span class="stat-label">Industry</span>
-								<span class="stat-value">{person.companyData.industry}</span>
-							</div>
-						{/if}
-						{#if person.companyData.location}
-							<div class="company-stat">
-								<span class="stat-label">Location</span>
-								<span class="stat-value">{person.companyData.location}</span>
-							</div>
-						{/if}
-						{#if person.companyData.founded}
-							<div class="company-stat">
-								<span class="stat-label">Founded</span>
-								<span class="stat-value">{person.companyData.founded}</span>
-							</div>
-						{/if}
-					</div>
-					{#if person.companyData.website}
-						<a href={person.companyData.website} target="_blank" rel="noopener noreferrer" class="company-website">
-							{person.companyData.website}
-							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-								<polyline points="15 3 21 3 21 9"></polyline>
-								<line x1="10" y1="14" x2="21" y2="3"></line>
-							</svg>
-						</a>
-					{/if}
-				</div>
-			{/if}
-
 			{#if person.highlights && person.highlights.length > 0}
 				<div class="highlights-section">
 					<h3 class="section-title">Key Highlights</h3>
