@@ -12,6 +12,7 @@ import {
 	type ClaudePromptResponse
 } from '$lib/types/claude';
 import { withRetry } from '$lib/utils/retry';
+import { countTokens } from '@anthropic-ai/tokenizer';
 
 const CLAUDE_API_URL = process.env.CLAUDE_API_URL || 'http://localhost:3001';
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -351,10 +352,10 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 	}
 
 	/**
-	 * Estimate token count from character count (~4 chars per token).
+	 * Count tokens using the official Anthropic tokenizer.
 	 */
-	private estimateTokens(text: string): number {
-		return Math.ceil(text.length / 4);
+	private countTokens(text: string): number {
+		return countTokens(text);
 	}
 
 	/**
@@ -384,7 +385,7 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 		// Build the prompt to estimate total tokens
 		const headerText = `${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}"` : ''}Job: ${jobDescription.substring(0, 400)}`;
 		const footerText = `\nEvaluate EVERY candidate above. Return a JSON array.\nEach object: {"id":N,"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"matchingFactors":["f1","f2","f3"],"reasoning":"1 sentence"}`;
-		const overheadTokens = this.estimateTokens(headerText + footerText);
+		const overheadTokens = this.countTokens(headerText + footerText);
 
 		// Calculate per-candidate token cost
 		const candidateTexts = candidates.map(c => {
@@ -392,7 +393,7 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 			if (c.companyContext) parts.push(`Company: ${c.companyContext}`);
 			return parts.join('\n');
 		});
-		const totalTokens = overheadTokens + this.estimateTokens(candidateTexts.join('\n\n'));
+		const totalTokens = overheadTokens + this.countTokens(candidateTexts.join('\n\n'));
 
 		// Auto-split if exceeds limit
 		if (totalTokens > MAX_INPUT_TOKENS && candidates.length > 1) {

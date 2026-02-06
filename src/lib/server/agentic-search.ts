@@ -6,6 +6,7 @@ import type { SearchResult, SearchFilters } from '$lib/types/exa';
 import { filterStateManager } from './filter-state-manager';
 import { exportStateManager } from './export-state-manager';
 import { extractCurrentCompanyData } from '$lib/utils/company-urls';
+import { countTokens } from '@anthropic-ai/tokenizer';
 
 interface RefinedQuery {
 	original: string;
@@ -422,9 +423,8 @@ export class AgenticSearchService {
 
 		const MAX_TOKENS_PER_BATCH = 120000; // Stay under 150K context window
 		const MAX_CONCURRENT_BATCHES = 3;
-		const CHARS_PER_TOKEN = 4;
 
-		// Build all candidate texts first to estimate total size
+		// Build all candidate texts first to measure actual token count
 		const allCandidates = results.map((result, i) => {
 			let companyCtx: string | undefined;
 			if (result.companyData) {
@@ -439,16 +439,15 @@ export class AgenticSearchService {
 			return { id: i, profile, companyContext: companyCtx };
 		});
 
-		// Estimate total tokens
-		const promptOverhead = 500; // job desc + instructions
-		const totalChars = allCandidates.reduce((sum, c) => sum + c.profile.length + (c.companyContext?.length || 0) + 30, 0);
-		const totalTokens = Math.ceil((totalChars + promptOverhead * CHARS_PER_TOKEN) / CHARS_PER_TOKEN);
+		// Count actual tokens using Anthropic tokenizer
+		const allText = allCandidates.map(c => c.profile + (c.companyContext || '')).join('\n\n');
+		const totalTokens = countTokens(allText) + countTokens(userQuery.substring(0, 400)) + 200; // +200 for prompt template
 
 		// Calculate how many batches we actually need
 		const numBatches = Math.max(1, Math.ceil(totalTokens / MAX_TOKENS_PER_BATCH));
 		const batchSize = Math.ceil(results.length / numBatches);
 
-		console.log(`LLM filtering: ${results.length} results, ~${totalTokens} tokens → ${numBatches} batch(es) of ~${batchSize} (max ${MAX_CONCURRENT_BATCHES} concurrent)`);
+		console.log(`LLM filtering: ${results.length} results, ${totalTokens} tokens → ${numBatches} batch(es) of ~${batchSize} (max ${MAX_CONCURRENT_BATCHES} concurrent)`);
 
 		// Track progress
 		let processed = 0;
