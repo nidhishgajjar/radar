@@ -4,6 +4,7 @@ import { ClaudeError, ClaudeErrorType } from '$lib/types/claude';
 import { QUERY_REFINEMENT_ENABLED } from '$env/static/private';
 import type { SearchResult, SearchFilters } from '$lib/types/exa';
 import { filterStateManager } from './filter-state-manager';
+import { exportStateManager } from './export-state-manager';
 import { extractCurrentCompanyData } from '$lib/utils/company-urls';
 
 interface RefinedQuery {
@@ -419,22 +420,27 @@ export class AgenticSearchService {
 			};
 		}
 
-		console.log(`Applying LLM filtering to ${results.length} results in parallel...`);
+		const BATCH_SIZE = 25;
+		const MAX_CONCURRENT_BATCHES = 3;
+
+		console.log(`Applying LLM filtering to ${results.length} results in batches of ${BATCH_SIZE} (max ${MAX_CONCURRENT_BATCHES} concurrent)...`);
 
 		// Track progress
 		let processed = 0;
 		const filteredResults: SearchResult[] = [];
 
-		// Process ALL results in parallel
-		const filterPromises = results.map(async (result) => {
-			try {
-				const profileSummary = `
-Title: ${result.title}
-URL: ${result.url}
-${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
-				`.trim();
+		// Build batches
+		const batches: SearchResult[][] = [];
+		for (let i = 0; i < results.length; i += BATCH_SIZE) {
+			batches.push(results.slice(i, i + BATCH_SIZE));
+		}
 
-				// Build company context from enriched data
+		console.log(`Split into ${batches.length} batches`);
+
+		// Process batches with concurrency limit
+		const processBatch = async (batch: SearchResult[], batchIdx: number) => {
+			// Build candidate entries for batch
+			const candidates = batch.map((result, i) => {
 				let companyCtx: string | undefined;
 				if (result.companyData) {
 					const cd = result.companyData;
@@ -443,55 +449,98 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 					if (cd.headcount) parts.push(`${cd.headcount} employees`);
 					if (cd.headquarters) parts.push(cd.headquarters);
 					companyCtx = parts.join(' | ');
-					if (cd.description) {
-						companyCtx += `\nAbout: ${cd.description.substring(0, 200)}`;
+				}
+
+				const profile = `Title: ${result.title}\nURL: ${result.url}\n${result.text ? `Profile:\n${result.text.substring(0, 800)}` : ''}`.trim();
+
+				return { id: i, profile, companyContext: companyCtx };
+			});
+
+			try {
+				const batchResults = await this.claude.filterCandidateBatch(
+					candidates,
+					userQuery,
+					filters?.excludeCurrentEmployer
+				);
+
+				// Map results back to SearchResult objects
+				for (const br of batchResults) {
+					const result = batch[br.id];
+					if (result) {
+						result.filterMetadata = {
+							currentEmployer: br.currentEmployer,
+							isExternal: br.isExternal,
+							fitScore: br.fitScore,
+							reasoning: br.reasoning,
+							recentlyLeft: br.recentlyLeft,
+							matchingFactors: br.matchingFactors || [],
+							keyHighlights: br.keyHighlights || []
+						};
+						filteredResults.push(result);
 					}
 				}
 
-				const filterResult = await this.claude.filterAndRankCandidate(
-					profileSummary,
-					userQuery,
-					filters?.excludeCurrentEmployer,
-					filters?.minYearsExperience,
-					companyCtx
-				);
-
-				result.filterMetadata = filterResult;
-
-				// Update progress immediately as each completes
-				processed++;
-				filteredResults.push(result);
-
-				if (searchId) {
-					const currentFiltered = filteredResults.filter((r) => {
-						if (!r.filterMetadata) return false;
-						if (filters?.externalOnly && !r.filterMetadata.isExternal) return false;
-						if (r.filterMetadata.fitScore < 40) return false;
-						return true;
-					}).sort((a, b) => (b.filterMetadata?.fitScore || 0) - (a.filterMetadata?.fitScore || 0));
-
-					filterStateManager.updateProgress(searchId, processed, currentFiltered);
+				// Handle any candidates missing from response
+				for (let i = 0; i < batch.length; i++) {
+					if (!batch[i].filterMetadata) {
+						batch[i].filterMetadata = {
+							isExternal: true,
+							fitScore: 20,
+							reasoning: 'Missing from batch response',
+							matchingFactors: [],
+							keyHighlights: []
+						};
+						filteredResults.push(batch[i]);
+					}
 				}
-
-				return result;
 			} catch (error) {
-				console.error('Failed to filter candidate:', error);
-				result.filterMetadata = {
-					isExternal: true,
-					fitScore: 30,
-					reasoning: 'Filtering error',
-					currentEmployer: undefined,
-					matchingFactors: [],
-					keyHighlights: []
-				};
-				processed++;
-				filteredResults.push(result);
-				return result;
+				console.error(`Batch ${batchIdx} failed:`, error);
+				for (const result of batch) {
+					result.filterMetadata = {
+						isExternal: true,
+						fitScore: 20,
+						reasoning: 'Batch filtering error',
+						matchingFactors: [],
+						keyHighlights: []
+					};
+					filteredResults.push(result);
+				}
 			}
-		});
 
-		// Wait for all to complete
-		await Promise.all(filterPromises);
+			processed += batch.length;
+			console.log(`Batch ${batchIdx + 1}/${batches.length} done (${processed}/${results.length} processed)`);
+
+			if (searchId) {
+				const currentFiltered = filteredResults.filter((r) => {
+					if (!r.filterMetadata) return false;
+					if (filters?.externalOnly && !r.filterMetadata.isExternal) return false;
+					if (r.filterMetadata.fitScore < 40) return false;
+					return true;
+				}).sort((a, b) => (b.filterMetadata?.fitScore || 0) - (a.filterMetadata?.fitScore || 0));
+
+				filterStateManager.updateProgress(searchId, processed, currentFiltered);
+				// Also update export progress (65-90% range for filtering phase)
+				const filterProgress = 65 + Math.round((processed / results.length) * 25);
+				exportStateManager.updateProgress(searchId, filterProgress, filteredResults.length);
+			}
+		};
+
+		// Run batches with concurrency limit
+		const running: Promise<void>[] = [];
+		for (let i = 0; i < batches.length; i++) {
+			const p = processBatch(batches[i], i);
+			running.push(p);
+
+			if (running.length >= MAX_CONCURRENT_BATCHES) {
+				await Promise.race(running);
+				// Remove completed promises
+				for (let j = running.length - 1; j >= 0; j--) {
+					const status = await Promise.race([running[j].then(() => 'done'), Promise.resolve('pending')]);
+					if (status === 'done') running.splice(j, 1);
+				}
+			}
+		}
+		await Promise.all(running);
 
 		// For forceFilter mode (export), return ALL results with their filterMetadata
 		// The caller will decide what to do with qualified vs unqualified

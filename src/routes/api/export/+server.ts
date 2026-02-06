@@ -148,11 +148,11 @@ async function processExport(
 		// Step 2: LLM filtering WITH company data available
 		exportStateManager.updateStatus(jobId, 'filtering', 65);
 
-		console.log(`[Export ${jobId}] Analyzing ${allResults.length} candidates with LLM (company data available)...`);
+		console.log(`[Export ${jobId}] Analyzing ${allResults.length} candidates with LLM in batches (company data available)...`);
 
 		// Use forceFilter=true to always run LLM filtering for export
 		// Results now have companyData attached, which the filter can use
-		const filterResult = await agenticSearch.filterResults(allResults, query, effectiveFilters, undefined, true);
+		const filterResult = await agenticSearch.filterResults(allResults, query, effectiveFilters, jobId, true);
 
 		// All results now have filterMetadata. Mark qualified based on fit score threshold
 		const allWithStatus = filterResult.results.map(result => {

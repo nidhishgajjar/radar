@@ -42,8 +42,8 @@ export function extractCurrentCompanyData(result: SearchResult): CompanyPageData
 	if (metaMatch) {
 		const metaLine = metaMatch[1];
 
-		// Headcount: "501-1000 employees" or "10,001+ employees"
-		const headcountMatch = metaLine.match(/(\d{1,3}(?:,\d{3})*(?:\+)?(?:\s*-\s*\d{1,3}(?:,\d{3})*)?)\s*employees/i);
+		// Headcount: "501-1000 employees", "1001-5000 employees", "10,001+ employees"
+		const headcountMatch = metaLine.match(/([\d,]+(?:\+)?(?:\s*-\s*[\d,]+)?)\s*employees/i);
 		if (headcountMatch) {
 			const raw = headcountMatch[1].replace(/,/g, '');
 			// For ranges like "501-1000", use upper bound; for "10001+", use the number

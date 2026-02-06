@@ -260,9 +260,11 @@ Return ONLY a JSON array of ${numQueries} search query strings.`;
 
 			const content = data.content.trim();
 
-			// Parse JSON array from response
+			// Parse JSON array from response (extract from code fences if present)
 			try {
-				const queries = JSON.parse(content);
+				const fenceMatch = content.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+				const jsonStr = fenceMatch ? fenceMatch[1].trim() : content.trim();
+				const queries = JSON.parse(jsonStr);
 				if (Array.isArray(queries) && queries.length > 0) {
 					return queries;
 				}
@@ -316,7 +318,10 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 			const content = data.content.trim();
 
 			try {
-				const parsed = JSON.parse(content);
+				// Extract JSON from response - handles preamble text + code fences
+				const fenceMatch = content.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+				const jsonStr = fenceMatch ? fenceMatch[1].trim() : content.trim();
+				const parsed = JSON.parse(jsonStr);
 				// Normalize: support both matchingFactors and legacy keyHighlights
 				if (parsed.matchingFactors && !parsed.keyHighlights) {
 					parsed.keyHighlights = parsed.matchingFactors;
@@ -342,6 +347,132 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 				matchingFactors: [],
 				keyHighlights: []
 			};
+		}
+	}
+
+	/**
+	 * Estimate token count from character count (~4 chars per token).
+	 */
+	private estimateTokens(text: string): number {
+		return Math.ceil(text.length / 4);
+	}
+
+	/**
+	 * Filter and rank a BATCH of candidates in a single LLM call.
+	 * Estimates tokens and auto-splits into sub-batches if prompt exceeds MAX_TOKENS.
+	 */
+	async filterCandidateBatch(
+		candidates: Array<{
+			id: number;
+			profile: string;
+			companyContext?: string;
+		}>,
+		jobDescription: string,
+		excludeEmployer?: string
+	): Promise<Array<{
+		id: number;
+		currentEmployer?: string;
+		isExternal: boolean;
+		fitScore: number;
+		reasoning: string;
+		recentlyLeft?: boolean;
+		matchingFactors?: string[];
+		keyHighlights?: string[];
+	}>> {
+		const MAX_INPUT_TOKENS = 120000; // Leave headroom under 150K context
+
+		// Build the prompt to estimate total tokens
+		const headerText = `${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}"` : ''}Job: ${jobDescription.substring(0, 400)}`;
+		const footerText = `\nEvaluate EVERY candidate above. Return a JSON array.\nEach object: {"id":N,"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"matchingFactors":["f1","f2","f3"],"reasoning":"1 sentence"}`;
+		const overheadTokens = this.estimateTokens(headerText + footerText);
+
+		// Calculate per-candidate token cost
+		const candidateTexts = candidates.map(c => {
+			const parts = [`[Candidate ${c.id}]\n${c.profile.substring(0, 800)}`];
+			if (c.companyContext) parts.push(`Company: ${c.companyContext}`);
+			return parts.join('\n');
+		});
+		const totalTokens = overheadTokens + this.estimateTokens(candidateTexts.join('\n\n'));
+
+		// Auto-split if exceeds limit
+		if (totalTokens > MAX_INPUT_TOKENS && candidates.length > 1) {
+			const numSplits = Math.ceil(totalTokens / MAX_INPUT_TOKENS);
+			const splitSize = Math.ceil(candidates.length / numSplits);
+			console.log(`[Claude] Batch of ${candidates.length} (~${totalTokens} tokens) exceeds ${MAX_INPUT_TOKENS}. Splitting into ${numSplits} sub-batches of ~${splitSize}`);
+
+			const allResults: Array<{
+				id: number; currentEmployer?: string; isExternal: boolean;
+				fitScore: number; reasoning: string; recentlyLeft?: boolean;
+				matchingFactors?: string[]; keyHighlights?: string[];
+			}> = [];
+
+			for (let i = 0; i < candidates.length; i += splitSize) {
+				const subBatch = candidates.slice(i, i + splitSize);
+				const subResults = await this.filterCandidateBatch(subBatch, jobDescription, excludeEmployer);
+				allResults.push(...subResults);
+			}
+			return allResults;
+		}
+
+		const candidateBlocks = candidateTexts.join('\n\n');
+
+		const prompt = `${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}" — if candidate works there, isExternal:false, fitScore:15.\n` : ''}Job: ${jobDescription.substring(0, 400)}
+
+${candidateBlocks}
+
+Evaluate EVERY candidate above. Return a JSON array with exactly ${candidates.length} objects, one per candidate in order.
+Each object: {"id":<number>,"currentEmployer":"name","isExternal":true/false,"fitScore":0-100,"matchingFactors":["f1","f2","f3"],"reasoning":"1 sentence"}
+Return ONLY the JSON array, no other text.`;
+
+		try {
+			const data = await this.fetchWithRetry({
+				prompt,
+				timeoutMs: 120000 // 2min for large batches
+			});
+
+			const content = data.content.trim();
+			const fenceMatch = content.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+			const jsonStr = fenceMatch ? fenceMatch[1].trim() : content.trim();
+			const parsed = JSON.parse(jsonStr);
+
+			if (Array.isArray(parsed)) {
+				return parsed.map((item: Record<string, unknown>) => {
+					if (item.matchingFactors && !item.keyHighlights) {
+						item.keyHighlights = item.matchingFactors;
+					}
+					return item as {
+						id: number;
+						currentEmployer?: string;
+						isExternal: boolean;
+						fitScore: number;
+						reasoning: string;
+						recentlyLeft?: boolean;
+						matchingFactors?: string[];
+						keyHighlights?: string[];
+					};
+				});
+			}
+
+			// If not an array, return fallbacks
+			console.warn('[Claude] Batch response was not an array, returning fallbacks');
+			return candidates.map(c => ({
+				id: c.id,
+				isExternal: true,
+				fitScore: 20,
+				reasoning: 'Batch parse error',
+				matchingFactors: [],
+				keyHighlights: []
+			}));
+		} catch (error) {
+			console.error('[Claude] Batch filtering failed:', error);
+			return candidates.map(c => ({
+				id: c.id,
+				isExternal: true,
+				fitScore: 20,
+				reasoning: 'Batch filtering failed',
+				matchingFactors: [],
+				keyHighlights: []
+			}));
 		}
 	}
 

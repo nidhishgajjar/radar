@@ -84,6 +84,19 @@ export class ExaWrapper {
 	async getContents(urls: string[]): Promise<Array<{ url: string; text: string }>> {
 		if (urls.length === 0) return [];
 
+		// Batch URLs to avoid overloading the API (max 100 per call)
+		const BATCH_SIZE = 100;
+		if (urls.length > BATCH_SIZE) {
+			const allResults: Array<{ url: string; text: string }> = [];
+			for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+				const batch = urls.slice(i, i + BATCH_SIZE);
+				console.log(`[Exa] getContents batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(urls.length / BATCH_SIZE)} (${batch.length} URLs)`);
+				const results = await this.getContents(batch);
+				allResults.push(...results);
+			}
+			return allResults;
+		}
+
 		return withRetry(
 			async () => {
 				const response = await fetch(`${this.baseUrl}/contents`, {
