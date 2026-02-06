@@ -298,15 +298,9 @@ Return ONLY a JSON array of ${numQueries} search query strings.`;
 		recentlyLeft?: boolean;
 		keyHighlights?: string[];
 	}> {
-		const prompt = `Analyze this LinkedIn profile for recruitment.
-${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}" - mark anyone currently working there as isExternal:false with fitScore 10-20.` : ''}
-
-Job: ${jobDescription}
-
-Profile:
-${profile.substring(0, 1500)}
-
-Return JSON: {"currentEmployer":"company or null","isExternal":true/false,"fitScore":0-100,"recentlyLeft":true/false,"keyHighlights":["highlight1","highlight2"],"reasoning":"brief"}`;
+		const prompt = `${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}" - if they work there, isExternal:false, fitScore:15.\n` : ''}Job: ${jobDescription.substring(0, 300)}
+Profile: ${profile.substring(0, 800)}
+Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"keyHighlights":["h1","h2"],"reasoning":"brief"}`;
 
 		try {
 			const data = await this.fetchWithRetry({
