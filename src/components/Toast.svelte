@@ -16,6 +16,7 @@
 		type = 'info',
 		progress = 0,
 		downloadUrl,
+		qualifiedDownloadUrl,
 		stats,
 		onClose,
 		autoDismiss = true,
@@ -25,6 +26,7 @@
 		type?: ToastType;
 		progress?: number;
 		downloadUrl?: string;
+		qualifiedDownloadUrl?: string;
 		stats?: ExportStats;
 		onClose: () => void;
 		autoDismiss?: boolean;
@@ -57,6 +59,12 @@
 	function handleDownload() {
 		if (downloadUrl) {
 			window.open(downloadUrl, '_blank');
+		}
+	}
+
+	function handleQualifiedDownload() {
+		if (qualifiedDownloadUrl) {
+			window.open(qualifiedDownloadUrl, '_blank');
 		}
 	}
 
@@ -107,25 +115,49 @@
 			</div>
 		{/if}
 
-		{#if downloadUrl}
-			<button class="download-link" onclick={handleDownload}>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					width="14"
-					height="14"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-					<polyline points="7 10 12 15 17 10"></polyline>
-					<line x1="12" y1="15" x2="12" y2="3"></line>
-				</svg>
-				Download CSV
-			</button>
+		{#if downloadUrl || qualifiedDownloadUrl}
+			<div class="download-buttons">
+				{#if qualifiedDownloadUrl}
+					<button class="download-link primary" onclick={handleQualifiedDownload}>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+							<polyline points="7 10 12 15 17 10"></polyline>
+							<line x1="12" y1="15" x2="12" y2="3"></line>
+						</svg>
+						Qualified Only
+					</button>
+				{/if}
+				{#if downloadUrl}
+					<button class="download-link" onclick={handleDownload}>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+							<polyline points="7 10 12 15 17 10"></polyline>
+							<line x1="12" y1="15" x2="12" y2="3"></line>
+						</svg>
+						All Results
+					</button>
+				{/if}
+			</div>
 		{/if}
 	</div>
 
@@ -248,11 +280,17 @@
 		transition: width 0.3s ease;
 	}
 
+	.download-buttons {
+		display: flex;
+		gap: 8px;
+		margin-top: 10px;
+		flex-wrap: wrap;
+	}
+
 	.download-link {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		margin-top: 10px;
 		padding: 6px 12px;
 		background: rgba(255, 255, 255, 0.15);
 		border: none;
@@ -266,6 +304,14 @@
 
 	.download-link:hover {
 		background: rgba(255, 255, 255, 0.25);
+	}
+
+	.download-link.primary {
+		background: rgba(255, 255, 255, 0.3);
+	}
+
+	.download-link.primary:hover {
+		background: rgba(255, 255, 255, 0.4);
 	}
 
 	.close-button {

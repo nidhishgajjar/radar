@@ -42,7 +42,7 @@
 	let exportProgress = $state(0);
 	let exportStatus = $state<string>('');
 	let isExportMode = $state(false);
-	let toast = $state<{ message: string; type: ToastType; downloadUrl?: string; stats?: { totalRawSearched: number; totalAfterDedup: number; totalPassedFilter: number; searchExhausted: boolean; stopReason: string } } | null>(null);
+	let toast = $state<{ message: string; type: ToastType; downloadUrl?: string; qualifiedDownloadUrl?: string; stats?: { totalRawSearched: number; totalAfterDedup: number; totalPassedFilter: number; searchExhausted: boolean; stopReason: string } } | null>(null);
 
 	// Request notification permission on mount
 	onMount(() => {
@@ -145,16 +145,17 @@
 					exportHistory.setActiveJob(null);
 					activeExportJobId = null;
 
-					// Show success toast with download link and stats
+					// Show success toast with download links and stats
 					toast = {
 						message: `Export ready: ${qualifiedCount} qualified, ${data.resultCount} total`,
 						type: 'success',
 						downloadUrl: `/api/export/${jobId}?download=true`,
+						qualifiedDownloadUrl: `/api/export/${jobId}?download=true&qualifiedOnly=true`,
 						stats: data.stats
 					};
 
-					// Trigger download
-					window.open(`/api/export/${jobId}?download=true`, '_blank');
+					// Auto-download qualified only (most common use case)
+					window.open(`/api/export/${jobId}?download=true&qualifiedOnly=true`, '_blank');
 
 					// Browser notification
 					if ('Notification' in window && Notification.permission === 'granted') {
@@ -721,6 +722,7 @@
 		type={toast.type}
 		progress={exportProgress}
 		downloadUrl={toast.downloadUrl}
+		qualifiedDownloadUrl={toast.qualifiedDownloadUrl}
 		stats={toast.stats}
 		onClose={closeToast}
 		autoDismiss={toast.type !== 'progress'}
