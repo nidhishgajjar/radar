@@ -413,39 +413,9 @@ export class AgenticSearchService {
 		let processed = 0;
 		const filteredResults: SearchResult[] = [];
 
-		// Pre-filter: Check titles for obvious internal employees BEFORE calling LLM
-		// This is fast, reliable, and saves API calls + avoids timeout issues
-		const excludeEmployer = filters?.excludeCurrentEmployer;
-
 		// Process ALL results in parallel
 		const filterPromises = results.map(async (result) => {
 			try {
-				// FAST PATH: Title-based detection of internal employees
-				// If title clearly shows they work at the excluded employer, skip LLM
-				if (excludeEmployer && this.titleIndicatesEmployer(result.title, excludeEmployer)) {
-					result.filterMetadata = {
-						isExternal: false,
-						fitScore: 15, // Low score - they already work there
-						reasoning: `Currently works at ${excludeEmployer} (detected from title)`,
-						currentEmployer: excludeEmployer,
-						keyHighlights: []
-					};
-					processed++;
-					filteredResults.push(result);
-
-					if (searchId) {
-						const currentFiltered = filteredResults.filter((r) => {
-							if (!r.filterMetadata) return false;
-							if (filters?.externalOnly && !r.filterMetadata.isExternal) return false;
-							if (r.filterMetadata.fitScore < 40) return false;
-							return true;
-						}).sort((a, b) => (b.filterMetadata?.fitScore || 0) - (a.filterMetadata?.fitScore || 0));
-						filterStateManager.updateProgress(searchId, processed, currentFiltered);
-					}
-					return result;
-				}
-
-				// SLOW PATH: Use LLM for candidates who aren't obviously internal
 				const profileSummary = `
 Title: ${result.title}
 URL: ${result.url}
@@ -479,24 +449,13 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 				return result;
 			} catch (error) {
 				console.error('Failed to filter candidate:', error);
-				// On timeout/error, check title as fallback before defaulting to external
-				if (excludeEmployer && this.titleIndicatesEmployer(result.title, excludeEmployer)) {
-					result.filterMetadata = {
-						isExternal: false,
-						fitScore: 15,
-						reasoning: `Likely works at ${excludeEmployer} (title match, LLM timeout)`,
-						currentEmployer: excludeEmployer,
-						keyHighlights: []
-					};
-				} else {
-					result.filterMetadata = {
-						isExternal: true,
-						fitScore: 30,
-						reasoning: 'Filtering error',
-						currentEmployer: undefined,
-						keyHighlights: []
-					};
-				}
+				result.filterMetadata = {
+					isExternal: true,
+					fitScore: 30,
+					reasoning: 'Filtering error',
+					currentEmployer: undefined,
+					keyHighlights: []
+				};
 				processed++;
 				filteredResults.push(result);
 				return result;
@@ -785,52 +744,6 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 	}
 
 	/**
-	 * Check if a candidate's title suggests they currently work at a specific employer.
-	 * Uses fuzzy matching to handle variations like "Alberta Health Services" vs "albertahealthservices".
-	 */
-	private titleIndicatesEmployer(title: string, employer: string): boolean {
-		if (!title || !employer) return false;
-
-		const titleLower = title.toLowerCase();
-		const employerLower = employer.toLowerCase();
-
-		// Normalize both for comparison (remove spaces, special chars)
-		const normalizedTitle = titleLower.replace(/[^a-z0-9]/g, '');
-		const normalizedEmployer = employerLower.replace(/[^a-z0-9]/g, '');
-
-		// Direct containment check
-		if (normalizedTitle.includes(normalizedEmployer)) {
-			return true;
-		}
-
-		// Check for common patterns like "at Company" or "| Company"
-		const patterns = [
-			new RegExp(`\\bat\\s+${employerLower.replace(/\s+/g, '\\s*')}`, 'i'),
-			new RegExp(`\\|\\s*${employerLower.replace(/\s+/g, '\\s*')}`, 'i'),
-			new RegExp(`-\\s*${employerLower.replace(/\s+/g, '\\s*')}`, 'i'),
-			new RegExp(`${employerLower.replace(/\s+/g, '\\s*')}\\s*$`, 'i'),
-		];
-
-		for (const pattern of patterns) {
-			if (pattern.test(titleLower)) {
-				return true;
-			}
-		}
-
-		// Check for word-based match (employer words appear in title)
-		const employerWords = employerLower.split(/\s+/).filter(w => w.length > 2);
-		if (employerWords.length >= 2) {
-			const matchCount = employerWords.filter(word => titleLower.includes(word)).length;
-			// If most employer words are in the title, likely a match
-			if (matchCount >= employerWords.length * 0.7) {
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	/**
 	 * Simple query similarity check (Jaccard similarity on words)
 	 */
 	private querySimilarity(a: string, b: string): number {
@@ -919,24 +832,10 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 		// Step 4: Apply LLM filtering to each result (in parallel batches)
 		if (filters?.externalOnly || filters?.excludeCurrentEmployer) {
 			console.log('Applying LLM filtering...');
-			const excludeEmployer = filters?.excludeCurrentEmployer;
 
 			const filterPromises = uniqueResults.map(async (result) => {
 				try {
-					// FAST PATH: Title-based detection of internal employees
-					if (excludeEmployer && this.titleIndicatesEmployer(result.title, excludeEmployer)) {
-						console.log(`[Pre-filter] Internal employee detected: "${result.title.substring(0, 60)}..."`);
-						result.filterMetadata = {
-							isExternal: false,
-							fitScore: 15,
-							reasoning: `Currently works at ${excludeEmployer} (detected from title)`,
-							currentEmployer: excludeEmployer,
-							keyHighlights: []
-						};
-						return result;
-					}
-
-					// SLOW PATH: Use LLM for non-obvious cases
+					// Create profile summary for LLM
 					const profileSummary = `
 Title: ${result.title}
 URL: ${result.url}
@@ -956,24 +855,14 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 					return result;
 				} catch (error) {
 					console.error('Failed to filter candidate:', error);
-					// On timeout/error, check title as fallback
-					if (excludeEmployer && this.titleIndicatesEmployer(result.title, excludeEmployer)) {
-						result.filterMetadata = {
-							isExternal: false,
-							fitScore: 15,
-							reasoning: `Likely works at ${excludeEmployer} (title match, LLM timeout)`,
-							currentEmployer: excludeEmployer,
-							keyHighlights: []
-						};
-					} else {
-						result.filterMetadata = {
-							isExternal: true,
-							fitScore: 30,
-							reasoning: 'Filtering error',
-							currentEmployer: undefined,
-							keyHighlights: []
-						};
-					}
+					// On error, mark as low score but keep in results
+					result.filterMetadata = {
+						isExternal: true,
+						fitScore: 30,
+						reasoning: 'Filtering error',
+						currentEmployer: undefined,
+						keyHighlights: []
+					};
 					return result;
 				}
 			});
