@@ -422,6 +422,7 @@ export class AgenticSearchService {
 		}
 
 		const MAX_TOKENS_PER_BATCH = 120000; // Stay under 150K context window
+		const MAX_CANDIDATES_PER_BATCH = 25; // Cap batch size for faster progress updates
 		const MAX_CONCURRENT_BATCHES = 3;
 
 		// Build all candidate texts first to measure actual token count
@@ -443,8 +444,10 @@ export class AgenticSearchService {
 		const allText = allCandidates.map(c => c.profile + (c.companyContext || '')).join('\n\n');
 		const totalTokens = countTokens(allText) + countTokens(userQuery.substring(0, 400)) + 200; // +200 for prompt template
 
-		// Calculate how many batches we actually need
-		const numBatches = Math.max(1, Math.ceil(totalTokens / MAX_TOKENS_PER_BATCH));
+		// Calculate how many batches we actually need (respect both token and candidate caps)
+		const tokenBatches = Math.max(1, Math.ceil(totalTokens / MAX_TOKENS_PER_BATCH));
+		const candidateBatches = Math.max(1, Math.ceil(results.length / MAX_CANDIDATES_PER_BATCH));
+		const numBatches = Math.max(tokenBatches, candidateBatches);
 		const batchSize = Math.ceil(results.length / numBatches);
 
 		console.log(`LLM filtering: ${results.length} results, ${totalTokens} tokens → ${numBatches} batch(es) of ~${batchSize} (max ${MAX_CONCURRENT_BATCHES} concurrent)`);

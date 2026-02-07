@@ -26,6 +26,15 @@
 	}
 
 	const { name, role } = parseTitle(person.title);
+
+	const fitScore = person.filterMetadata?.fitScore;
+	const scoreClass = fitScore !== undefined && fitScore >= 70 ? 'high' : fitScore !== undefined && fitScore >= 40 ? 'mid' : '';
+	const factors = person.filterMetadata?.matchingFactors || person.filterMetadata?.keyHighlights || [];
+
+	function formatHeadcount(n: number): string {
+		if (n >= 1000) return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k';
+		return n.toString();
+	}
 </script>
 
 <div class="card">
@@ -49,9 +58,31 @@
 					{#if person.filterMetadata?.recentlyLeft}
 						<span class="recently-left-chip">Recently Left</span>
 					{/if}
+					{#if fitScore !== undefined && fitScore >= 40}
+						<span class="score-badge {scoreClass}">{fitScore}</span>
+					{/if}
 				</div>
 				{#if role}
 					<p class="role">{role}</p>
+				{/if}
+				{#if person.companyData}
+					<div class="company-section">
+						<span class="company-name">{person.companyData.name}</span>
+						<div class="company-meta">
+							{#if person.companyData.industry}
+								<span class="meta-item">{person.companyData.industry}</span>
+							{/if}
+							{#if person.companyData.headcount}
+								<span class="meta-item">{formatHeadcount(person.companyData.headcount)} employees</span>
+							{/if}
+							{#if person.companyData.headquarters}
+								<span class="meta-item">{person.companyData.headquarters}</span>
+							{/if}
+						</div>
+					</div>
+				{/if}
+				{#if factors.length > 0}
+					<p class="matching-factors">{factors.slice(0, 2).join(' · ')}</p>
 				{/if}
 			</div>
 		</div>
@@ -160,6 +191,26 @@
 		letter-spacing: -0.01em;
 	}
 
+	.score-badge {
+		display: inline-flex;
+		align-items: center;
+		padding: 2px 7px;
+		border-radius: 5px;
+		font-size: 11px;
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.score-badge.high {
+		background: rgba(52, 199, 89, 0.14);
+		color: #1a7a34;
+	}
+
+	.score-badge.mid {
+		background: rgba(255, 204, 0, 0.16);
+		color: #8a6d00;
+	}
+
 	.name {
 		color: #1d1d1f;
 		font-size: 17px;
@@ -178,32 +229,49 @@
 		font-weight: 400;
 	}
 
-	.company-stats {
+	.company-section {
+		margin-top: 6px;
+		padding: 6px 8px;
+		background: #f9f9fb;
+		border-radius: 6px;
+	}
+
+	.company-name {
+		font-size: 13px;
+		font-weight: 600;
+		color: #1d1d1f;
+		letter-spacing: -0.01em;
+	}
+
+	.company-meta {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 8px;
-		margin-top: 8px;
-	}
-
-	.stat {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		padding: 3px 8px;
-		background: #f5f5f7;
-		color: #1d1d1f;
-		font-size: 12px;
-		font-weight: 500;
-		border-radius: 4px;
-	}
-
-	.stat svg {
+		gap: 4px 10px;
+		margin-top: 3px;
+		font-size: 11px;
 		color: #86868b;
 	}
 
-	.stat.industry {
-		background: rgba(0, 122, 255, 0.08);
-		color: #007aff;
+	.meta-item {
+		white-space: nowrap;
+	}
+
+	.meta-item:not(:last-child)::after {
+		content: '·';
+		margin-left: 10px;
+		color: #c7c7cc;
+	}
+
+	.matching-factors {
+		margin-top: 6px;
+		font-size: 12px;
+		color: #86868b;
+		font-style: italic;
+		letter-spacing: -0.01em;
+		line-height: 1.4;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.linkedin-link {
