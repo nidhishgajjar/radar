@@ -72,7 +72,9 @@
 							{#if person.companyData.industry}
 								<span class="meta-item">{person.companyData.industry}</span>
 							{/if}
-							{#if person.companyData.headcount}
+							{#if person.companyData.headcountRange}
+								<span class="meta-item">{person.companyData.headcountRange}</span>
+							{:else if person.companyData.headcount}
 								<span class="meta-item">{formatHeadcount(person.companyData.headcount)} employees</span>
 							{/if}
 							{#if person.companyData.headquarters}

@@ -77,6 +77,7 @@ export interface CompanyPageData {
 	description?: string;
 	industry?: string;
 	headcount?: number;
+	headcountRange?: string;
 	headquarters?: string;
 	founded?: string;
 	specialties?: string[];

@@ -172,10 +172,10 @@
 									<div class="company-meta-value">{person.companyData.industry}</div>
 								</div>
 							{/if}
-							{#if person.companyData.headcount}
+							{#if person.companyData.headcountRange || person.companyData.headcount}
 								<div class="company-meta-item">
 									<div class="company-meta-label">Employees</div>
-									<div class="company-meta-value">{formatHeadcount(person.companyData.headcount)}</div>
+									<div class="company-meta-value">{person.companyData.headcountRange || formatHeadcount(person.companyData.headcount!)}</div>
 								</div>
 							{/if}
 							{#if person.companyData.headquarters}
