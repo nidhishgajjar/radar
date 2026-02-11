@@ -3,7 +3,7 @@
 	let { value = $bindable(''), flexibleLocation = $bindable(false), searchMode = $bindable<SearchMode>('search'), onSearch }: { value: string; flexibleLocation: boolean; searchMode: SearchMode; onSearch: (query: string, mode: SearchMode) => void } = $props();
 
 	// Detect input mode
-	type InputMode = 'search' | 'url' | 'jd';
+	type InputMode = 'search' | 'url' | 'detailed';
 
 	let inputMode = $derived<InputMode>(() => {
 		const trimmed = value.trim();
@@ -17,12 +17,12 @@
 			// Not a URL
 		}
 
-		// Check if it's a job description (long text with job keywords)
+		// Check if it's a detailed description (long text with search keywords)
 		if (trimmed.length > 150) {
-			const jobKeywords = ['experience', 'required', 'responsibilities', 'qualifications', 'skills', 'years', 'looking for', 'seeking', 'position', 'role'];
+			const searchKeywords = ['experience', 'required', 'qualifications', 'skills', 'years', 'looking for', 'seeking', 'founder', 'ceo'];
 			const lowerText = trimmed.toLowerCase();
-			const matches = jobKeywords.filter(kw => lowerText.includes(kw)).length;
-			if (matches >= 2) return 'jd';
+			const matches = searchKeywords.filter(kw => lowerText.includes(kw)).length;
+			if (matches >= 2) return 'detailed';
 		}
 
 		return 'search';
@@ -32,19 +32,19 @@
 		search: {
 			icon: 'search',
 			label: 'Search',
-			placeholder: 'Search for talent...',
+			placeholder: 'Search for people...',
 			color: '#007aff'
 		},
 		url: {
 			icon: 'link',
-			label: 'Job URL',
-			placeholder: 'Paste job posting URL to find candidates...',
+			label: 'URL',
+			placeholder: 'Paste URL to extract search criteria...',
 			color: '#007aff'
 		},
-		jd: {
+		detailed: {
 			icon: 'doc',
-			label: 'Job Description',
-			placeholder: 'Paste job description...',
+			label: 'Detailed',
+			placeholder: 'Paste detailed search criteria...',
 			color: '#007aff'
 		}
 	};
@@ -92,12 +92,12 @@
 					<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
 					<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
 				</svg>
-				<span>Job URL</span>
+				<span>URL</span>
 			</button>
 			<button
 				type="button"
 				class="mode-pill"
-				class:active={inputMode() === 'jd'}
+				class:active={inputMode() === 'detailed'}
 			>
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
 					<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
@@ -105,7 +105,7 @@
 					<line x1="16" y1="13" x2="8" y2="13"></line>
 					<line x1="16" y1="17" x2="8" y2="17"></line>
 				</svg>
-				<span>Job Description</span>
+				<span>Detailed</span>
 			</button>
 		</div>
 
@@ -132,7 +132,7 @@
 				{/if}
 			</div>
 
-			{#if inputMode() === 'jd'}
+			{#if inputMode() === 'detailed'}
 				<textarea
 					bind:value
 					onkeydown={handleKeydown}

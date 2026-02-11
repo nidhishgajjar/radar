@@ -102,7 +102,7 @@
 		<div class="modal-header">
 			<h2 class="modal-title">Export to CSV</h2>
 			<p class="modal-subtitle">
-				Export all unique candidates found. Qualified candidates appear first.
+				Export all unique profiles found. Qualified matches appear first.
 			</p>
 		</div>
 
@@ -123,7 +123,7 @@
 					</div>
 					<div class="option-content">
 						<span class="option-title">Export Current ({currentResultCount})</span>
-						<span class="option-desc">Download the {currentResultCount} candidates currently loaded</span>
+						<span class="option-desc">Download the {currentResultCount} profiles currently loaded</span>
 					</div>
 					<div class="option-badge fast">Instant</div>
 				</button>
@@ -150,7 +150,7 @@
 					{/if}
 					<div class="option-content">
 						<span class="option-title">Export All (Exhaustive Search)</span>
-						<span class="option-desc">Search for all available candidates and export when ready</span>
+						<span class="option-desc">Search for all available profiles and export when ready</span>
 					</div>
 					<div class="option-badge thorough">Thorough</div>
 				</button>
@@ -160,14 +160,14 @@
 				<div class="info-item">
 					<span class="info-icon qualified">✓</span>
 					<div class="info-text">
-						<span class="info-label">Qualified candidates first</span>
-						<span class="info-desc">Sorted by job fit score</span>
+						<span class="info-label">Qualified matches first</span>
+						<span class="info-desc">Sorted by relevance score</span>
 					</div>
 				</div>
 				<div class="info-item">
 					<span class="info-icon other">○</span>
 					<div class="info-text">
-						<span class="info-label">Other candidates included</span>
+						<span class="info-label">Other profiles included</span>
 						<span class="info-desc">Unique profiles that didn't pass filter</span>
 					</div>
 				</div>

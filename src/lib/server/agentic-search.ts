@@ -38,18 +38,18 @@ export class AgenticSearchService {
 		}
 	}
 
-	private isJobDescription(text: string): boolean {
-		// If text is longer than 200 characters and contains job-related keywords
+	private isDetailedDescription(text: string): boolean {
+		// If text is longer than 200 characters and contains search-related keywords
 		if (text.length < 200) return false;
 
-		const jobKeywords = [
-			'experience', 'required', 'responsibilities', 'qualifications',
-			'skills', 'years', 'bachelor', 'degree', 'looking for',
-			'seeking', 'hiring', 'position', 'role', 'candidate'
+		const searchKeywords = [
+			'experience', 'required', 'qualifications',
+			'skills', 'years', 'looking for',
+			'seeking', 'position', 'role', 'founder', 'ceo'
 		];
 
 		const lowerText = text.toLowerCase();
-		const keywordMatches = jobKeywords.filter(keyword => lowerText.includes(keyword)).length;
+		const keywordMatches = searchKeywords.filter(keyword => lowerText.includes(keyword)).length;
 
 		return keywordMatches >= 3;
 	}
@@ -109,7 +109,7 @@ export class AgenticSearchService {
 		if (!content) {
 			throw new Error('Failed to fetch job URL content');
 		}
-		return await this.claude.extractRequirementsFromJob(content);
+		return await this.claude.extractSearchIntent(content);
 	}
 
 	async fetchJobContent(url: string): Promise<string | null> {
@@ -157,11 +157,11 @@ export class AgenticSearchService {
 
 		// Detect input type
 		const isUrl = this.isURL(userQuery);
-		const isJobDesc = !isUrl && this.isJobDescription(userQuery);
+		const isDetailedDesc = !isUrl && this.isDetailedDescription(userQuery);
 
-		// Handle job URL
+		// Handle URL
 		if (isUrl) {
-			console.log('Detected job URL, extracting requirements...');
+			console.log('Detected URL, extracting search intent...');
 			try {
 				const extractedQuery = await this.processJobURL(userQuery);
 				return {
@@ -171,16 +171,16 @@ export class AgenticSearchService {
 					cached: false
 				};
 			} catch (error) {
-				console.error('Failed to process job URL:', error);
+				console.error('Failed to process URL:', error);
 				// Fallback to normal processing
 			}
 		}
 
-		// Handle job description
-		if (isJobDesc) {
-			console.log('Detected job description, extracting requirements...');
+		// Handle detailed description
+		if (isDetailedDesc) {
+			console.log('Detected detailed description, extracting search intent...');
 			try {
-				const extractedQuery = await this.claude.extractRequirementsFromJob(userQuery);
+				const extractedQuery = await this.claude.extractSearchIntent(userQuery);
 
 				if (this.isValidQuery(extractedQuery)) {
 					return {
@@ -191,7 +191,7 @@ export class AgenticSearchService {
 					};
 				}
 			} catch (error) {
-				console.error('Failed to extract requirements from job description:', error);
+				console.error('Failed to extract search intent from detailed description:', error);
 				// Fallback to normal processing
 			}
 		}
@@ -272,38 +272,38 @@ export class AgenticSearchService {
 			const queryGenStart = Date.now();
 			console.log('Generating recruitment queries...');
 
-			let jobContent = userQuery;
-			let employerFromUrl: string | null = null;
+			let searchContent = userQuery;
+			let companyFromUrl: string | null = null;
 
-			// Check if input is a URL - fetch the job content AND extract employer
+			// Check if input is a URL - fetch the content AND extract company
 			if (this.isURL(userQuery)) {
-				console.log('Detected job URL, fetching content...');
+				console.log('Detected URL, fetching content...');
 
-				// Extract employer from URL hostname
-				employerFromUrl = this.extractEmployerFromURL(userQuery);
-				if (employerFromUrl) {
-					console.log(`Extracted employer from URL: "${employerFromUrl}"`);
+				// Extract company from URL hostname
+				companyFromUrl = this.extractEmployerFromURL(userQuery);
+				if (companyFromUrl) {
+					console.log(`Extracted company from URL: "${companyFromUrl}"`);
 				}
 
 				const content = await this.fetchJobContent(userQuery);
 				if (content) {
-					jobContent = content;
-					console.log('Fetched job content:', content.substring(0, 200) + '...');
+					searchContent = content;
+					console.log('Fetched content:', content.substring(0, 200) + '...');
 
-					// Prepend employer context to job content so LLM knows this is the hiring company
-					if (employerFromUrl) {
-						jobContent = `HIRING COMPANY: ${employerFromUrl}\n\n${content}`;
+					// Prepend company context so LLM knows to exclude this company
+					if (companyFromUrl) {
+						searchContent = `EXCLUDE COMPANY: ${companyFromUrl}\n\n${content}`;
 					}
 				}
 			}
 
-			// Use employer from URL if not explicitly set in filters
-			const excludeEmployer = filters?.excludeCurrentEmployer || employerFromUrl || undefined;
+			// Use company from URL if not explicitly set in filters
+			const excludeCompany = filters?.excludeCurrentEmployer || companyFromUrl || undefined;
 
 			// Generate queries directly from content (one LLM call)
-			const generated = await this.claude.generateRecruitmentQueries(
-				jobContent,
-				excludeEmployer,
+			const generated = await this.claude.generateSearchQueries(
+				searchContent,
+				excludeCompany,
 				filters?.geographicFocus,
 				filters?.flexibleLocation ?? false
 			);
@@ -374,8 +374,8 @@ export class AgenticSearchService {
 		}
 		console.log(`Extracted company data for ${companyCount}/${uniqueResults.length} profiles from text`);
 
-		// Use employer from URL if not explicitly set in filters
-		const extractedEmployer = this.isURL(userQuery) ? this.extractEmployerFromURL(userQuery) : null;
+		// Use company from URL if not explicitly set in filters
+		const extractedCompany = this.isURL(userQuery) ? this.extractEmployerFromURL(userQuery) : null;
 
 		// Return immediately with raw results - NO filtering applied
 		return {
@@ -389,7 +389,7 @@ export class AgenticSearchService {
 				queries_used: searchQueries,
 				queries_generated: queriesGenerated,
 				filtering_applied: false,
-				extracted_employer: extractedEmployer
+				extracted_company: extractedCompany
 			}
 		};
 	}
@@ -425,32 +425,39 @@ export class AgenticSearchService {
 		const MAX_CANDIDATES_PER_BATCH = 25; // Cap batch size for faster progress updates
 		const MAX_CONCURRENT_BATCHES = 3;
 
-		// Build all candidate texts first to measure actual token count
-		const allCandidates = results.map((result, i) => {
+		// Build all person data with FULL profile text and ALL company fields
+		const allPeople = results.map((result, i) => {
 			let companyCtx: string | undefined;
 			if (result.companyData) {
 				const cd = result.companyData;
-				const parts = [cd.name];
-				if (cd.industry) parts.push(cd.industry);
-				if (cd.headcount) parts.push(`${cd.headcount} employees`);
-				if (cd.headquarters) parts.push(cd.headquarters);
+				const parts: string[] = [];
+
+				// Include ALL available company fields
+				if (cd.name) parts.push(`Name: ${cd.name}`);
+				if (cd.industry) parts.push(`Industry: ${cd.industry}`);
+				if (cd.headcount) parts.push(`Headcount: ${cd.headcount}`);
+				if (cd.headquarters) parts.push(`Headquarters: ${cd.headquarters}`);
+				if (cd.founded) parts.push(`Founded: ${cd.founded}`);
+				if (cd.type) parts.push(`Type: ${cd.type}`);
+
 				companyCtx = parts.join(' | ');
 			}
-			const profile = `Title: ${result.title}\nURL: ${result.url}\n${result.text ? `Profile:\n${result.text.substring(0, 800)}` : ''}`.trim();
+			// Send FULL profile text (no truncation)
+			const profile = `Title: ${result.title}\nURL: ${result.url}\n${result.text ? `Profile:\n${result.text}` : ''}`.trim();
 			return { id: i, profile, companyContext: companyCtx };
 		});
 
-		// Count actual tokens using Anthropic tokenizer
-		const allText = allCandidates.map(c => c.profile + (c.companyContext || '')).join('\n\n');
-		const totalTokens = countTokens(allText) + countTokens(userQuery.substring(0, 400)) + 200; // +200 for prompt template
+		// Count actual tokens using Anthropic tokenizer (with FULL profile text now)
+		const allText = allPeople.map(p => p.profile + (p.companyContext || '')).join('\n\n');
+		const totalTokens = countTokens(allText) + countTokens(userQuery) + 1000; // +1000 for rubric + prompt template
 
-		// Calculate how many batches we actually need (respect both token and candidate caps)
+		// Calculate how many batches we actually need (respect both token and person caps)
 		const tokenBatches = Math.max(1, Math.ceil(totalTokens / MAX_TOKENS_PER_BATCH));
-		const candidateBatches = Math.max(1, Math.ceil(results.length / MAX_CANDIDATES_PER_BATCH));
-		const numBatches = Math.max(tokenBatches, candidateBatches);
+		const peopleBatches = Math.max(1, Math.ceil(results.length / MAX_CANDIDATES_PER_BATCH));
+		const numBatches = Math.max(tokenBatches, peopleBatches);
 		const batchSize = Math.ceil(results.length / numBatches);
 
-		console.log(`LLM filtering: ${results.length} results, ${totalTokens} tokens → ${numBatches} batch(es) of ~${batchSize} (max ${MAX_CONCURRENT_BATCHES} concurrent)`);
+		console.log(`LLM filtering: ${results.length} people, ${totalTokens} tokens → ${numBatches} batch(es) of ~${batchSize} (max ${MAX_CONCURRENT_BATCHES} concurrent)`);
 
 		// Track progress
 		let processed = 0;
@@ -464,15 +471,15 @@ export class AgenticSearchService {
 
 		// Process batches with concurrency limit
 		const processBatch = async (batch: SearchResult[], batchIdx: number, startIdx: number) => {
-			// Slice the pre-built candidates for this batch, re-index from 0
-			const candidates = allCandidates.slice(startIdx, startIdx + batch.length).map((c, i) => ({
-				...c,
+			// Slice the pre-built people for this batch, re-index from 0
+			const people = allPeople.slice(startIdx, startIdx + batch.length).map((p, i) => ({
+				...p,
 				id: i
 			}));
 
 			try {
-				const batchResults = await this.claude.filterCandidateBatch(
-					candidates,
+				const batchResults = await this.claude.filterPeopleBatch(
+					people,
 					userQuery,
 					filters?.excludeCurrentEmployer
 				);
@@ -740,7 +747,7 @@ export class AgenticSearchService {
 			if (shouldGenerateMore) {
 				console.log(`[Bulk Search] Generating more queries (previous yield: ${yieldRate}%)...`);
 
-				const newQueries = await this.claude.generateRecruitmentQueries(
+				const newQueries = await this.claude.generateSearchQueries(
 					userQuery,
 					filters?.excludeCurrentEmployer,
 					filters?.geographicFocus,
@@ -771,7 +778,7 @@ export class AgenticSearchService {
 				// Low yield - check if we should stop or try one more batch
 				console.log(`[Bulk Search] Low yield (${yieldRate}%) - trying one more query batch...`);
 
-				const lastChanceQueries = await this.claude.generateRecruitmentQueries(
+				const lastChanceQueries = await this.claude.generateSearchQueries(
 					userQuery,
 					filters?.excludeCurrentEmployer,
 					filters?.geographicFocus,
@@ -867,7 +874,7 @@ export class AgenticSearchService {
 			const refinedQuery = await this.refineQuery(userQuery);
 
 			// Then generate multiple search angles
-			const generated = await this.claude.generateRecruitmentQueries(
+			const generated = await this.claude.generateSearchQueries(
 				refinedQuery.refined,
 				filters?.excludeCurrentEmployer,
 				filters?.geographicFocus
@@ -934,11 +941,10 @@ URL: ${result.url}
 ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 					`.trim();
 
-					const filterResult = await this.claude.filterAndRankCandidate(
+					const filterResult = await this.claude.filterAndRankPerson(
 						profileSummary,
 						userQuery,
-						filters?.excludeCurrentEmployer,
-						filters?.minYearsExperience
+						filters?.excludeCurrentEmployer
 					);
 
 					// Add filter metadata to result

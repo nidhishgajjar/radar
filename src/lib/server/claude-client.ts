@@ -197,57 +197,57 @@ Output: "Marketing Director Canada SaaS software B2B experience"`;
 	}
 
 	/**
-	 * Generate multiple recruitment search queries from a job description.
+	 * Generate multiple search queries from a people search description.
 	 */
-	async generateRecruitmentQueries(
-		jobDescription: string,
-		excludeEmployer?: string,
+	async generateSearchQueries(
+		searchQuery: string,
+		excludeCompany?: string,
 		geographicFocus?: string[],
 		flexibleLocation: boolean = false,
 		numQueries: number = 4,
 		previousQueries?: string[]
 	): Promise<string[]> {
-		// Extract location from job description for strict filtering
-		const locationMatch = jobDescription.match(/\b(Toronto|Vancouver|Calgary|Edmonton|Ottawa|Montreal|Winnipeg|Halifax|Victoria|BC|Ontario|Alberta|Quebec|Canada|USA|New York|San Francisco|Seattle|Boston|Chicago|Los Angeles|Austin|Denver|Miami|Atlanta)\b/gi);
+		// Extract location from search query for strict filtering
+		const locationMatch = searchQuery.match(/\b(Toronto|Vancouver|Calgary|Edmonton|Ottawa|Montreal|Winnipeg|Halifax|Victoria|BC|Ontario|Alberta|Quebec|Canada|USA|New York|San Francisco|Seattle|Boston|Chicago|Los Angeles|Austin|Denver|Miami|Atlanta)\b/gi);
 		const detectedLocation = locationMatch ? [...new Set(locationMatch)].join(', ') : null;
 
 		const geoContext = geographicFocus?.length
 			? `Focus on these regions: ${geographicFocus.join(', ')}`
 			: detectedLocation
-				? `STRICT LOCATION: Only search for candidates in or near ${detectedLocation}`
+				? `STRICT LOCATION: Only search for people in or near ${detectedLocation}`
 				: 'Search across Canada and USA';
 
 		const locationRule = flexibleLocation
 			? 'Location is flexible - include nearby regions'
 			: detectedLocation
-				? `CRITICAL: Every query MUST include "${detectedLocation}" - only find candidates in this specific location`
+				? `CRITICAL: Every query MUST include "${detectedLocation}" - only find people in this specific location`
 				: '';
 
-		const excludeContext = excludeEmployer
-			? `CRITICAL: Exclude anyone currently at "${excludeEmployer}"`
+		const excludeContext = excludeCompany
+			? `CRITICAL: Exclude anyone currently at "${excludeCompany}"`
 			: '';
 
 		const previousContext = previousQueries?.length
 			? `\nALREADY USED (generate DIFFERENT queries, not these):\n${previousQueries.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\nGenerate NEW angles that haven't been tried.`
 			: '';
 
-		const systemPrompt = `You are an executive recruiter generating LinkedIn search queries to find EXTERNAL candidates.
+		const systemPrompt = `You are a people search specialist generating LinkedIn search queries to find relevant profiles.
 
-Job: ${jobDescription}
+Search Intent: ${searchQuery}
 
 ${geoContext}
 ${locationRule}
 ${excludeContext}
 ${previousContext}
 
-Generate ${numQueries} ${previousQueries?.length ? 'NEW and DIFFERENT' : 'different'} search queries that will find RECRUITABLE external candidates:
+Generate ${numQueries} ${previousQueries?.length ? 'NEW and DIFFERENT' : 'different'} search queries that will find matching profiles:
 
 RULES:
-1. Focus on similar roles at OTHER organizations${excludeEmployer ? ` (not ${excludeEmployer})` : ''}
-2. ${detectedLocation && !flexibleLocation ? `MANDATORY: Include "${detectedLocation}" in EVERY query` : 'Include geographic locations from the job description'}
-3. Use the EXACT job title from the description (e.g., "Executive Director" not just "Director")
-4. Include industry/domain keywords (healthcare, technology, finance, etc.)
-5. Each query should target different candidate pools - vary titles, industries, related roles
+1. Focus on people at various organizations${excludeCompany ? ` (not ${excludeCompany})` : ''}
+2. ${detectedLocation && !flexibleLocation ? `MANDATORY: Include "${detectedLocation}" in EVERY query` : 'Include geographic locations from the search intent'}
+3. Use the EXACT titles/roles from the description (e.g., "Founder" not just "Entrepreneur")
+4. Include industry/domain keywords (DTC, Consumer Goods, CPG, etc.)
+5. Each query should target different pools - vary titles, industries, related roles
 6. Think creatively: include adjacent roles, related industries, competitor companies${previousQueries?.length ? '\n7. MUST be completely different from already-used queries - try synonyms, related titles, adjacent industries' : ''}
 
 Return ONLY a JSON array of ${numQueries} search query strings.`;
@@ -255,7 +255,7 @@ Return ONLY a JSON array of ${numQueries} search query strings.`;
 		try {
 			const data = await this.fetchWithRetry({
 				system: systemPrompt,
-				prompt: jobDescription,
+				prompt: searchQuery,
 				timeoutMs: 20000
 			});
 
@@ -277,23 +277,22 @@ Return ONLY a JSON array of ${numQueries} search query strings.`;
 				}
 			}
 
-			// Fallback: use original job description
-			return [jobDescription];
+			// Fallback: use original search query
+			return [searchQuery];
 		} catch (error) {
-			console.error('Failed to generate recruitment queries:', error);
-			return [jobDescription];
+			console.error('Failed to generate search queries:', error);
+			return [searchQuery];
 		}
 	}
 
 	/**
-	 * Filter and rank a candidate profile against job requirements.
+	 * Filter and rank a person's profile against search criteria.
 	 * Accepts optional company context from LinkedIn page enrichment.
 	 */
-	async filterAndRankCandidate(
+	async filterAndRankPerson(
 		profile: string,
-		jobDescription: string,
-		excludeEmployer?: string,
-		minYearsExperience?: number,
+		searchQuery: string,
+		excludeCompany?: string,
 		companyContext?: string
 	): Promise<{
 		currentEmployer?: string;
@@ -304,9 +303,9 @@ Return ONLY a JSON array of ${numQueries} search query strings.`;
 		matchingFactors?: string[];
 		keyHighlights?: string[];
 	}> {
-		const prompt = `${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}" - if they work there, isExternal:false, fitScore:15.\n` : ''}Job: ${jobDescription.substring(0, 400)}
+		const prompt = `${excludeCompany ? `EXCLUDE COMPANY: "${excludeCompany}" - if they currently work there, isExternal:false, fitScore:15.\n` : ''}Search: ${searchQuery.substring(0, 500)}
 
-Profile: ${profile.substring(0, 1000)}
+Profile: ${profile}
 ${companyContext ? `\nCurrent Company: ${companyContext}` : ''}
 Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"matchingFactors":["factor1","factor2","factor3"],"reasoning":"2-3 sentence explanation"}`;
 
@@ -339,7 +338,7 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 				};
 			}
 		} catch (error) {
-			console.error('Failed to filter candidate:', error);
+			console.error('Failed to filter person:', error);
 			return {
 				currentEmployer: undefined,
 				isExternal: true,
@@ -359,17 +358,17 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 	}
 
 	/**
-	 * Filter and rank a BATCH of candidates in a single LLM call.
+	 * Filter and rank a BATCH of people in a single LLM call.
 	 * Estimates tokens and auto-splits into sub-batches if prompt exceeds MAX_TOKENS.
 	 */
-	async filterCandidateBatch(
-		candidates: Array<{
+	async filterPeopleBatch(
+		people: Array<{
 			id: number;
 			profile: string;
 			companyContext?: string;
 		}>,
-		jobDescription: string,
-		excludeEmployer?: string
+		searchQuery: string,
+		excludeCompany?: string
 	): Promise<Array<{
 		id: number;
 		currentEmployer?: string;
@@ -382,24 +381,41 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 	}>> {
 		const MAX_INPUT_TOKENS = 120000; // Leave headroom under 150K context
 
+		// Build scoring rubric
+		const rubric = `SCORING RUBRIC (0-100):
+90-100: Exact match - title, industry, seniority, location, and company profile all align precisely with search intent
+75-89: Strong match - most criteria match, may differ in one dimension (e.g., slightly different title but same function/industry)
+60-74: Good match - relevant experience and background, adjacent title/industry or slightly different seniority
+40-59: Partial match - some overlap in skills or industry but differs in seniority, function, or company type
+20-39: Weak match - minimal relevance, different field or function, tangential connection at best
+0-19: No match - completely unrelated to search criteria
+
+SCORING DIMENSIONS:
+1. Role/Title alignment - how closely does their current/recent role match what's being searched for?
+2. Industry/Domain fit - are they in the right industry or directly adjacent?
+3. Seniority level - does their career level match the intent (founder, VP, IC, etc.)?
+4. Company profile match - does their company type match (startup vs enterprise, D2C vs B2B, headcount range)?
+5. Geographic relevance - are they in the right location if specified?
+6. Career trajectory - does their career path suggest they're the kind of person being searched for?`;
+
 		// Build the prompt to estimate total tokens
-		const headerText = `${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}"` : ''}Job: ${jobDescription.substring(0, 400)}`;
-		const footerText = `\nEvaluate EVERY candidate above. Return a JSON array.\nEach object: {"id":N,"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"matchingFactors":["f1","f2","f3"],"reasoning":"1 sentence"}`;
+		const headerText = `${excludeCompany ? `EXCLUDE COMPANY: "${excludeCompany}"\n` : ''}Search Intent: ${searchQuery}\n\n${rubric}`;
+		const footerText = `\nEvaluate EVERY person above using the rubric. Return a JSON array with exactly ${people.length} objects.\nEach object: {"id":N,"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"matchingFactors":["f1","f2","f3"],"reasoning":"1-2 sentences"}`;
 		const overheadTokens = this.countTokens(headerText + footerText);
 
-		// Calculate per-candidate token cost
-		const candidateTexts = candidates.map(c => {
-			const parts = [`[Candidate ${c.id}]\n${c.profile.substring(0, 800)}`];
-			if (c.companyContext) parts.push(`Company: ${c.companyContext}`);
+		// Calculate per-person token cost - NO TRUNCATION, send full profile + all company fields
+		const personTexts = people.map(p => {
+			const parts = [`[Person ${p.id}]\nTitle: ${p.profile.split('\n')[0]}\nURL: ${p.profile.split('\n')[1]}\nProfile:\n${p.profile.split('Profile:\n')[1] || p.profile}`];
+			if (p.companyContext) parts.push(`\nCompany Context: ${p.companyContext}`);
 			return parts.join('\n');
 		});
-		const totalTokens = overheadTokens + this.countTokens(candidateTexts.join('\n\n'));
+		const totalTokens = overheadTokens + this.countTokens(personTexts.join('\n\n---\n\n'));
 
 		// Auto-split if exceeds limit
-		if (totalTokens > MAX_INPUT_TOKENS && candidates.length > 1) {
+		if (totalTokens > MAX_INPUT_TOKENS && people.length > 1) {
 			const numSplits = Math.ceil(totalTokens / MAX_INPUT_TOKENS);
-			const splitSize = Math.ceil(candidates.length / numSplits);
-			console.log(`[Claude] Batch of ${candidates.length} (~${totalTokens} tokens) exceeds ${MAX_INPUT_TOKENS}. Splitting into ${numSplits} sub-batches of ~${splitSize}`);
+			const splitSize = Math.ceil(people.length / numSplits);
+			console.log(`[Claude] Batch of ${people.length} (~${totalTokens} tokens) exceeds ${MAX_INPUT_TOKENS}. Splitting into ${numSplits} sub-batches of ~${splitSize}`);
 
 			const allResults: Array<{
 				id: number; currentEmployer?: string; isExternal: boolean;
@@ -407,22 +423,24 @@ Return JSON only: {"currentEmployer":"name","isExternal":bool,"fitScore":0-100,"
 				matchingFactors?: string[]; keyHighlights?: string[];
 			}> = [];
 
-			for (let i = 0; i < candidates.length; i += splitSize) {
-				const subBatch = candidates.slice(i, i + splitSize);
-				const subResults = await this.filterCandidateBatch(subBatch, jobDescription, excludeEmployer);
+			for (let i = 0; i < people.length; i += splitSize) {
+				const subBatch = people.slice(i, i + splitSize);
+				const subResults = await this.filterPeopleBatch(subBatch, searchQuery, excludeCompany);
 				allResults.push(...subResults);
 			}
 			return allResults;
 		}
 
-		const candidateBlocks = candidateTexts.join('\n\n');
+		const personBlocks = personTexts.join('\n\n---\n\n');
 
-		const prompt = `${excludeEmployer ? `HIRING COMPANY: "${excludeEmployer}" — if candidate works there, isExternal:false, fitScore:15.\n` : ''}Job: ${jobDescription.substring(0, 400)}
+		const prompt = `${excludeCompany ? `EXCLUDE COMPANY: "${excludeCompany}" — if person currently works there, isExternal:false, fitScore:15.\n\n` : ''}Search Intent: ${searchQuery}
 
-${candidateBlocks}
+${rubric}
 
-Evaluate EVERY candidate above. Return a JSON array with exactly ${candidates.length} objects, one per candidate in order.
-Each object: {"id":<number>,"currentEmployer":"name","isExternal":true/false,"fitScore":0-100,"matchingFactors":["f1","f2","f3"],"reasoning":"1 sentence"}
+${personBlocks}
+
+Evaluate EVERY person above using the scoring rubric. Return a JSON array with exactly ${people.length} objects, one per person in order.
+Each object: {"id":<number>,"currentEmployer":"name","isExternal":true/false,"fitScore":0-100,"matchingFactors":["factor1","factor2","factor3"],"reasoning":"1-2 sentences explaining the score"}
 Return ONLY the JSON array, no other text.`;
 
 		try {
@@ -456,8 +474,8 @@ Return ONLY the JSON array, no other text.`;
 
 			// If not an array, return fallbacks
 			console.warn('[Claude] Batch response was not an array, returning fallbacks');
-			return candidates.map(c => ({
-				id: c.id,
+			return people.map(p => ({
+				id: p.id,
 				isExternal: true,
 				fitScore: 20,
 				reasoning: 'Batch parse error',
@@ -466,8 +484,8 @@ Return ONLY the JSON array, no other text.`;
 			}));
 		} catch (error) {
 			console.error('[Claude] Batch filtering failed:', error);
-			return candidates.map(c => ({
-				id: c.id,
+			return people.map(p => ({
+				id: p.id,
 				isExternal: true,
 				fitScore: 20,
 				reasoning: 'Batch filtering failed',
@@ -478,42 +496,40 @@ Return ONLY the JSON array, no other text.`;
 	}
 
 	/**
-	 * Extract search requirements from a job posting/URL content.
+	 * Extract search intent from a detailed description or URL content.
 	 */
-	async extractRequirementsFromJob(jobContent: string): Promise<string> {
-		const systemPrompt = `You are a candidate search query generator for recruiters.
+	async extractSearchIntent(content: string): Promise<string> {
+		const systemPrompt = `You are a people search query optimizer.
 
-You receive a job description and output a search query to find CANDIDATES who would be good fit for this role.
-
-CRITICAL: We are looking for POTENTIAL CANDIDATES to hire, NOT current employees at the company posting the job.
+You receive a detailed description or webpage content and output a concise search query to find matching people.
 
 Extract and format:
-1. Job title/role (without company name)
-2. Core skills and technologies
-3. Years of experience level
+1. Key roles/titles being searched for
+2. Core skills, domains, or industries
+3. Experience level or seniority
 4. Location if mentioned
-5. Industry experience
+5. Company characteristics (size, type, industry)
 
 RULES:
-1. Focus on candidate qualifications, not company name
-2. Use professional terminology candidates use in profiles
-3. Include seniority level (junior, mid, senior, lead, principal, staff)
-4. Keep query under 100 characters
+1. Focus on person characteristics, not organizations
+2. Use professional terminology people use in profiles
+3. Include seniority level (founder, C-level, VP, director, senior, etc.)
+4. Keep query focused and under 150 characters
 5. Return ONLY the search query - no explanations or context
 
 EXAMPLES:
-Input: "Shopify is hiring a Senior React Developer with 5+ years experience in TypeScript, Node.js, and AWS in Toronto"
-Output: "Senior React Developer TypeScript Node.js AWS Toronto 5+ years"
+Input: "Find founders of DTC brands in Toronto with 11-50 employees in the health and wellness space"
+Output: "Founder CEO DTC Consumer Brand Health Wellness Toronto 11-50 employees"
 
-Input: "Google seeks Principal Engineer for distributed systems team in Vancouver"
-Output: "Principal Engineer distributed systems Vancouver cloud architecture"
+Input: "Looking for VPs of Engineering at fintech startups in Vancouver with Series A/B funding"
+Output: "VP Engineering fintech startup Vancouver Series A B funding"
 
-Input: "Looking for Marketing Director with B2B SaaS experience in Vancouver"
-Output: "Marketing Director B2B SaaS Vancouver growth marketing"`;
+Input: "Product designers with experience at top tech companies in the Bay Area"
+Output: "Product Designer FAANG tech company San Francisco Bay Area"`;
 
 		const data = await this.fetchWithRetry({
 			system: systemPrompt,
-			prompt: jobContent,
+			prompt: content,
 			timeoutMs: 15000
 		});
 
@@ -522,7 +538,7 @@ Output: "Marketing Director B2B SaaS Vancouver growth marketing"`;
 		// Validate the extracted query
 		if (extractedQuery.length === 0 || extractedQuery.length > 200) {
 			console.warn('Invalid extracted query length, returning original');
-			return jobContent.substring(0, 200);
+			return content.substring(0, 200);
 		}
 
 		return extractedQuery;

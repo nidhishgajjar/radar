@@ -491,7 +491,7 @@
 	<div class="container">
 		<header class="header">
 			<h1 class="title">Radar</h1>
-			<p class="subtitle">Talent intelligence for smarter hiring</p>
+			<p class="subtitle">Find the right people, faster</p>
 		</header>
 
 		<SearchBar bind:value={query} bind:flexibleLocation={flexibleLocation} bind:searchMode={searchMode} onSearch={handleSearch} />
