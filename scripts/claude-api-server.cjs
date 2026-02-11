@@ -50,7 +50,9 @@ function runClaudePrompt(systemPrompt, userPrompt, options = {}) {
 	return new Promise((resolve, reject) => {
 		const { maxTokens = 1000, timeoutMs = 30000 } = options;
 
-		const args = ['-p', userPrompt, '--output-format', 'text', '--model', 'sonnet'];
+		// Pipe prompt via stdin to avoid E2BIG errors on large prompts.
+		// The -p flag without a value reads from stdin.
+		const args = ['-p', '--output-format', 'text', '--model', 'sonnet'];
 
 		if (systemPrompt) {
 			args.push('--system-prompt', systemPrompt);
@@ -68,7 +70,8 @@ function runClaudePrompt(systemPrompt, userPrompt, options = {}) {
 			cwd: process.cwd()
 		});
 
-		// Close stdin immediately
+		// Write prompt to stdin then close it
+		child.stdin.write(userPrompt);
 		child.stdin.end();
 
 		let stdout = '';
