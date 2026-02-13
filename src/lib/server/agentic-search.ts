@@ -525,7 +525,7 @@ export class AgenticSearchService {
 				const currentFiltered = filteredResults.filter((r) => {
 					if (!r.filterMetadata) return false;
 					if (filters?.externalOnly && !r.filterMetadata.isExternal) return false;
-					if (r.filterMetadata.fitScore < 40) return false;
+					if (r.filterMetadata.fitScore < 70) return false;
 					return true;
 				}).sort((a, b) => (b.filterMetadata?.fitScore || 0) - (a.filterMetadata?.fitScore || 0));
 
@@ -584,9 +584,9 @@ export class AgenticSearchService {
 			});
 
 			// Mark qualified based on fit score threshold
-			const qualifiedCount = resultsToReturn.filter(r => (r.filterMetadata?.fitScore || 0) >= 40).length;
+			const qualifiedCount = resultsToReturn.filter(r => (r.filterMetadata?.fitScore || 0) >= 70).length;
 
-			console.log(`Analyzed ${resultsToReturn.length} candidates, ${qualifiedCount} qualified (fitScore >= 40)`);
+			console.log(`Analyzed ${resultsToReturn.length} candidates, ${qualifiedCount} qualified (fitScore >= 70)`);
 
 			return {
 				results: resultsToReturn,
@@ -612,7 +612,7 @@ export class AgenticSearchService {
 			}
 
 			// Minimum fit score threshold
-			if (result.filterMetadata.fitScore < 40) {
+			if (result.filterMetadata.fitScore < 70) {
 				return false;
 			}
 
@@ -971,7 +971,7 @@ ${result.text ? `Profile:\n${result.text.substring(0, 2000)}` : ''}
 				}
 
 				// Minimum fit score threshold
-				if (result.filterMetadata.fitScore < 40) {
+				if (result.filterMetadata.fitScore < 70) {
 					return false;
 				}
 

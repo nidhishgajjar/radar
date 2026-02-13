@@ -174,7 +174,7 @@ async function processExport(
 		const allFiltered = filterResult.results;
 		for (const result of allFiltered) {
 			if (result.filterMetadata) {
-				(result.filterMetadata as any).qualified = result.filterMetadata.fitScore >= 40;
+				(result.filterMetadata as any).qualified = result.filterMetadata.fitScore >= 70;
 			}
 		}
 

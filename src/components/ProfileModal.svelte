@@ -41,7 +41,7 @@
 	const { name, role } = parseTitle(person.title);
 
 	const fitScore = person.filterMetadata?.fitScore;
-	const scoreClass = fitScore !== undefined && fitScore >= 70 ? 'high' : fitScore !== undefined && fitScore >= 40 ? 'mid' : 'low';
+	const scoreClass = fitScore !== undefined && fitScore >= 85 ? 'high' : fitScore !== undefined && fitScore >= 70 ? 'mid' : 'low';
 	const factors = person.filterMetadata?.matchingFactors || person.filterMetadata?.keyHighlights || [];
 
 	// Get work history from entities

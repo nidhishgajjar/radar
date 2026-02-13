@@ -92,10 +92,10 @@ function escapeCSVValue(value: string): string {
 		return '';
 	}
 
-	const stringValue = String(value);
+	const stringValue = String(value).replace(/[\r\n]+/g, ' ').trim();
 
-	// If contains comma, quote, or newline, wrap in quotes and escape internal quotes
-	if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+	// If contains comma or quote, wrap in quotes and escape internal quotes
+	if (stringValue.includes(',') || stringValue.includes('"')) {
 		return `"${stringValue.replace(/"/g, '""')}"`;
 	}
 

@@ -28,7 +28,7 @@
 	const { name, role } = parseTitle(person.title);
 
 	const fitScore = person.filterMetadata?.fitScore;
-	const scoreClass = fitScore !== undefined && fitScore >= 70 ? 'high' : fitScore !== undefined && fitScore >= 40 ? 'mid' : '';
+	const scoreClass = fitScore !== undefined && fitScore >= 85 ? 'high' : fitScore !== undefined && fitScore >= 70 ? 'mid' : '';
 	const factors = person.filterMetadata?.matchingFactors || person.filterMetadata?.keyHighlights || [];
 
 	function formatHeadcount(n: number): string {
@@ -58,7 +58,7 @@
 					{#if person.filterMetadata?.recentlyLeft}
 						<span class="recently-left-chip">Recently Left</span>
 					{/if}
-					{#if fitScore !== undefined && fitScore >= 40}
+					{#if fitScore !== undefined && fitScore >= 70}
 						<span class="score-badge {scoreClass}">{fitScore}</span>
 					{/if}
 				</div>
