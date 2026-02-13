@@ -9,6 +9,9 @@ import { extractCurrentCompanyData } from '$lib/utils/company-urls';
 
 const agenticSearch = new AgenticSearchService();
 
+// Only allow one export at a time to prevent OOM on Railway's limited memory
+let activeExportId: string | null = null;
+
 /**
  * Check if a string is a URL
  */
@@ -31,16 +34,29 @@ export const POST: RequestHandler = async ({ request }) => {
 			return json({ error: 'Query is required' }, { status: 400 });
 		}
 
-		// searchQueries is now optional - will be generated if not provided
+		// Reject if another export is already running
+		if (activeExportId) {
+			const existingJob = exportStateManager.getJob(activeExportId);
+			if (existingJob && existingJob.status !== 'ready' && existingJob.status !== 'error') {
+				return json({ error: 'Another export is already running. Please wait for it to finish.' }, { status: 429 });
+			}
+			// Previous export finished or errored — allow new one
+			activeExportId = null;
+		}
 
 		// Create export job (tier=0 means export all)
 		const jobId = crypto.randomUUID();
+		activeExportId = jobId;
 		exportStateManager.createJob(jobId, query, 0);
 
 		// Start background processing (fire-and-forget)
 		processExport(jobId, query, searchQueries, filters).catch((error) => {
 			console.error('Export processing failed:', error);
 			exportStateManager.markError(jobId, error.message || 'Export failed');
+		}).finally(() => {
+			if (activeExportId === jobId) {
+				activeExportId = null;
+			}
 		});
 
 		// Return immediately with job ID
@@ -154,31 +170,22 @@ async function processExport(
 		// Results now have companyData attached, which the filter can use
 		const filterResult = await agenticSearch.filterResults(allResults, query, effectiveFilters, jobId, true);
 
-		// All results now have filterMetadata. Mark qualified based on fit score threshold
-		const allWithStatus = filterResult.results.map(result => {
-			const fitScore = result.filterMetadata?.fitScore || 0;
-			const isQualified = fitScore >= 40;
-
-			return {
-				...result,
-				filterMetadata: {
-					isExternal: true as boolean,
-					fitScore: 0,
-					reasoning: '',
-					...result.filterMetadata,
-					qualified: isQualified
-				}
-			};
-		});
+		// Mark qualified in place (no copy) to reduce memory
+		const allFiltered = filterResult.results;
+		for (const result of allFiltered) {
+			if (result.filterMetadata) {
+				(result.filterMetadata as any).qualified = result.filterMetadata.fitScore >= 40;
+			}
+		}
 
 		// Get qualified results for counting
-		const qualifiedResults = allWithStatus.filter(r => r.filterMetadata?.qualified);
+		const qualifiedResults = allFiltered.filter(r => (r.filterMetadata as any)?.qualified);
 
 		// Sort: qualified first (by recentlyLeft, then fitScore), then others
-		const sortedResults = allWithStatus.sort((a, b) => {
+		const sortedResults = allFiltered.sort((a, b) => {
 			// Qualified candidates first
-			const aQualified = a.filterMetadata?.qualified ? 1 : 0;
-			const bQualified = b.filterMetadata?.qualified ? 1 : 0;
+			const aQualified = (a.filterMetadata as any)?.qualified ? 1 : 0;
+			const bQualified = (b.filterMetadata as any)?.qualified ? 1 : 0;
 			if (aQualified !== bQualified) return bQualified - aQualified;
 
 			// Among qualified: recently left first

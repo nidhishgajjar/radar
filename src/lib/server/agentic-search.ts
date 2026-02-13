@@ -456,7 +456,9 @@ export class AgenticSearchService {
 					if (cd.type) parts.push(`Type: ${cd.type}`);
 					companyCtx = parts.join(' | ');
 				}
-				const profile = `Title: ${result.title}\nURL: ${result.url}\n${result.text ? `Profile:\n${result.text}` : ''}`.trim();
+				// Truncate profile text for LLM — full text already used for company extraction
+			const truncatedText = result.text ? result.text.substring(0, 2000) : '';
+			const profile = `Title: ${result.title}\nURL: ${result.url}\n${truncatedText ? `Profile:\n${truncatedText}` : ''}`.trim();
 				return { id: i, profile, companyContext: companyCtx };
 			});
 
