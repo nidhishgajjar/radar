@@ -6,7 +6,6 @@ import type { SearchResult, SearchFilters } from '$lib/types/exa';
 import { filterStateManager } from './filter-state-manager';
 import { exportStateManager } from './export-state-manager';
 import { extractCurrentCompanyData } from '$lib/utils/company-urls';
-import { countTokens } from '@anthropic-ai/tokenizer';
 
 interface RefinedQuery {
 	original: string;
@@ -421,43 +420,15 @@ export class AgenticSearchService {
 			};
 		}
 
-		const MAX_TOKENS_PER_BATCH = 120000; // Stay under 150K context window
 		const MAX_CANDIDATES_PER_BATCH = 25; // Cap batch size for faster progress updates
-		const MAX_CONCURRENT_BATCHES = 3;
+		// Run batches sequentially (1 at a time) to keep memory low on Railway
+		const MAX_CONCURRENT_BATCHES = 1;
 
-		// Build all person data with FULL profile text and ALL company fields
-		const allPeople = results.map((result, i) => {
-			let companyCtx: string | undefined;
-			if (result.companyData) {
-				const cd = result.companyData;
-				const parts: string[] = [];
+		// Estimate batch count from person count alone (avoid building giant string for token counting)
+		const numBatches = Math.max(1, Math.ceil(results.length / MAX_CANDIDATES_PER_BATCH));
+		const batchSize = MAX_CANDIDATES_PER_BATCH;
 
-				// Include ALL available company fields
-				if (cd.name) parts.push(`Name: ${cd.name}`);
-				if (cd.industry) parts.push(`Industry: ${cd.industry}`);
-				if (cd.headcount) parts.push(`Headcount: ${cd.headcount}`);
-				if (cd.headquarters) parts.push(`Headquarters: ${cd.headquarters}`);
-				if (cd.founded) parts.push(`Founded: ${cd.founded}`);
-				if (cd.type) parts.push(`Type: ${cd.type}`);
-
-				companyCtx = parts.join(' | ');
-			}
-			// Send FULL profile text (no truncation)
-			const profile = `Title: ${result.title}\nURL: ${result.url}\n${result.text ? `Profile:\n${result.text}` : ''}`.trim();
-			return { id: i, profile, companyContext: companyCtx };
-		});
-
-		// Count actual tokens using Anthropic tokenizer (with FULL profile text now)
-		const allText = allPeople.map(p => p.profile + (p.companyContext || '')).join('\n\n');
-		const totalTokens = countTokens(allText) + countTokens(userQuery) + 1000; // +1000 for rubric + prompt template
-
-		// Calculate how many batches we actually need (respect both token and person caps)
-		const tokenBatches = Math.max(1, Math.ceil(totalTokens / MAX_TOKENS_PER_BATCH));
-		const peopleBatches = Math.max(1, Math.ceil(results.length / MAX_CANDIDATES_PER_BATCH));
-		const numBatches = Math.max(tokenBatches, peopleBatches);
-		const batchSize = Math.ceil(results.length / numBatches);
-
-		console.log(`LLM filtering: ${results.length} people, ${totalTokens} tokens → ${numBatches} batch(es) of ~${batchSize} (max ${MAX_CONCURRENT_BATCHES} concurrent)`);
+		console.log(`LLM filtering: ${results.length} people → ${numBatches} batch(es) of ~${batchSize} (max ${MAX_CONCURRENT_BATCHES} concurrent)`);
 
 		// Track progress
 		let processed = 0;
@@ -470,12 +441,24 @@ export class AgenticSearchService {
 		}
 
 		// Process batches with concurrency limit
-		const processBatch = async (batch: SearchResult[], batchIdx: number, startIdx: number) => {
-			// Slice the pre-built people for this batch, re-index from 0
-			const people = allPeople.slice(startIdx, startIdx + batch.length).map((p, i) => ({
-				...p,
-				id: i
-			}));
+		const processBatch = async (batch: SearchResult[], batchIdx: number) => {
+			// Build person data for THIS batch only (not all at once)
+			const people = batch.map((result, i) => {
+				let companyCtx: string | undefined;
+				if (result.companyData) {
+					const cd = result.companyData;
+					const parts: string[] = [];
+					if (cd.name) parts.push(`Name: ${cd.name}`);
+					if (cd.industry) parts.push(`Industry: ${cd.industry}`);
+					if (cd.headcount) parts.push(`Headcount: ${cd.headcount}`);
+					if (cd.headquarters) parts.push(`Headquarters: ${cd.headquarters}`);
+					if (cd.founded) parts.push(`Founded: ${cd.founded}`);
+					if (cd.type) parts.push(`Type: ${cd.type}`);
+					companyCtx = parts.join(' | ');
+				}
+				const profile = `Title: ${result.title}\nURL: ${result.url}\n${result.text ? `Profile:\n${result.text}` : ''}`.trim();
+				return { id: i, profile, companyContext: companyCtx };
+			});
 
 			try {
 				const batchResults = await this.claude.filterPeopleBatch(
@@ -528,6 +511,11 @@ export class AgenticSearchService {
 				}
 			}
 
+			// Free profile text after filtering to reduce memory pressure
+			for (const result of batch) {
+				result.text = '';
+			}
+
 			processed += batch.length;
 			console.log(`Batch ${batchIdx + 1}/${batches.length} done (${processed}/${results.length} processed)`);
 
@@ -549,8 +537,7 @@ export class AgenticSearchService {
 		// Run batches with concurrency limit
 		const running: Promise<void>[] = [];
 		for (let i = 0; i < batches.length; i++) {
-			const startIdx = i * batchSize;
-			const p = processBatch(batches[i], i, startIdx);
+			const p = processBatch(batches[i], i);
 			running.push(p);
 
 			if (running.length >= MAX_CONCURRENT_BATCHES) {
